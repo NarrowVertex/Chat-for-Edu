@@ -9,8 +9,10 @@ import {
   Panel,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import './index.css';
+import UserManagement from './components/UserManagement';
+import AIAssistant from './components/AIAssistant';
 
 const initialNodes = [
   { 
@@ -32,6 +34,8 @@ const initialEdges = [{ id: 'e1-2', source: '1', target: '2', animated: true }];
 export default function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [isUserPanelOpen, setIsUserPanelOpen] = useState(false);
+  const [isAIPanelOpen, setIsAIPanelOpen] = useState(false);
 
   const onConnect = useCallback(
     (params) => setEdges((eds) => addEdge({ ...params, animated: true }, eds)),
@@ -78,10 +82,22 @@ export default function App() {
           style={{ background: 'rgba(30, 41, 59, 0.7)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.1)' }}
         />
         
+        <Panel position="top-right" className="toolbar system-toolbar">
+          <button onClick={() => setIsUserPanelOpen(!isUserPanelOpen)}>
+            {isUserPanelOpen ? 'Close Users' : 'Users (MySQL)'}
+          </button>
+          <button onClick={() => setIsAIPanelOpen(!isAIPanelOpen)} className="ai-btn">
+            {isAIPanelOpen ? 'Close AI' : 'AI Assistant'}
+          </button>
+        </Panel>
+
         <Panel position="top-center" className="toolbar">
           <button onClick={addNode}>+ Add Node</button>
           <button className="delete-btn" onClick={deleteSelected}>Delete Selected</button>
         </Panel>
+
+        <UserManagement isOpen={isUserPanelOpen} onClose={() => setIsUserPanelOpen(false)} />
+        <AIAssistant isOpen={isAIPanelOpen} onClose={() => setIsAIPanelOpen(false)} />
       </ReactFlow>
     </div>
   );
