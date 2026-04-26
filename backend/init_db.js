@@ -58,9 +58,11 @@ async function init() {
         understanding_score INT DEFAULT 0,
         is_favorite BOOLEAN DEFAULT FALSE,
         node_type ENUM('qa', 'content') DEFAULT 'qa',
+        reference_node_id INT DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (chat_id) REFERENCES Chats(id) ON DELETE CASCADE,
-        FOREIGN KEY (parent_id) REFERENCES Messages(id) ON DELETE CASCADE
+        FOREIGN KEY (parent_id) REFERENCES Messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (reference_node_id) REFERENCES Messages(id) ON DELETE SET NULL
     );`;
 
     await connection.query(createUsers);

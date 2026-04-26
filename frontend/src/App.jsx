@@ -67,6 +67,7 @@ function App() {
   // AI 응답 로딩 상태
   const [isGenerating, setIsGenerating] = useState(false);
   const textareaRef = useRef(null);
+  const contextSelectorRef = useRef(null);
 
   // 입력창 자동 높이 조절
   useEffect(() => {
@@ -76,6 +77,23 @@ function App() {
       textareaRef.current.style.height = `${nextHeight}px`;
     }
   }, [inputText]);
+
+  // 부모 노드 선택 팝업 닫기 (Click Outside)
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (contextSelectorRef.current && !contextSelectorRef.current.contains(event.target)) {
+        setIsContextSelectorOpen(false);
+      }
+    };
+
+    if (isContextSelectorOpen) {
+      document.addEventListener('mousedown', handleClickOutside, true);
+    } else {
+      document.removeEventListener('mousedown', handleClickOutside, true);
+    }
+
+    return () => document.removeEventListener('mousedown', handleClickOutside, true);
+  }, [isContextSelectorOpen]);
 
   // 사용자의 채팅 목록 불러오기
   const fetchChats = async (userId) => {
@@ -97,6 +115,18 @@ function App() {
       if (response.ok) {
         const data = await response.json();
         setNodes(data);
+
+        // 현재 선택된 컨텍스트 노드 정보도 최신 데이터로 동기화
+        setContextNode(prev => {
+          if (!prev) return null;
+          return data.find(n => n.id === prev.id) || prev;
+        });
+
+        // 만약 선택된 노드가 있다면 그것도 최신화
+        setSelectedNode(prev => {
+          if (!prev) return null;
+          return data.find(n => n.id === prev.id) || prev;
+        });
 
         if (data.length > 0) {
           // 1. 명시적으로 지정된 ID가 있다면 그것을 선택
@@ -238,10 +268,38 @@ function App() {
         body: JSON.stringify(updates)
       });
       if (response.ok) {
-        fetchNodes(activeChat.id); // 전체 리스트 갱신
+        // 선 끊기/연결 등 큰 변화가 있을 때는 확실히 await 하여 순서를 보장
+        await fetchNodes(activeChat.id); 
       }
     } catch (err) {
       console.error('Update Node Error:', err);
+    }
+  };
+
+  const handleConnectEdge = async (connection) => {
+    const { source, target, sourceHandle } = connection;
+    // sourceHandle: 'right' (형제) or 'bottom' (자식)
+    const connectionType = sourceHandle === 'bottom' ? 'child' : 'sibling';
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/nodes/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_id: source,
+          target_id: target,
+          connection_type: connectionType
+        })
+      });
+      if (response.ok) {
+        await fetchNodes(activeChat.id); // 트리 재정렬 및 변경된 라벨 반영
+      } else {
+        const errorData = await response.json();
+        alert(errorData.error || '선 연결에 실패했습니다.');
+      }
+    } catch (err) {
+      console.error('Connect Edge Error:', err);
+      alert('백엔드 서버 오류로 선 연결에 실패했습니다.');
     }
   };
 
@@ -365,11 +423,13 @@ function App() {
     const segments = pLabel.split('-'); // ["M1", "1"] or ["M1", "1", "S1", "1"]
 
     if (isSub) {
-      // --- 세부 질문 모드 (Detailed: 깊이 증가) ---
-      const depth = (pLabel.match(/-S/g) || []).length;
-      const nextLevelNum = depth + 1;
-      const prefix = `${pLabel}-S${nextLevelNum}-`; // e.g. M1-1-S1-
-      const sameLevelNodes = allNodes.filter(n => n.node_label.startsWith(prefix));
+      // --- 세부 질문 모드 (Detailed: 새로운 뎁스는 항상 S1로 시작) ---
+      const prefix = `${pLabel}-S1-`; // 무조건 새로운 깊이는 S1로 시작
+      const expectedSegmentsLength = segments.length + 2;
+      const sameLevelNodes = allNodes.filter(n => 
+        n.node_label.startsWith(prefix) && 
+        n.node_label.split('-').length === expectedSegmentsLength
+      );
       return `${prefix}${sameLevelNodes.length + 1}`;
     } else {
       // --- 일반 질문 모드 (General: 단계 증가 및 버전 관리) ---
@@ -383,7 +443,11 @@ function App() {
       const pPrefixSegments = segments.slice(0, segments.length - 2);
       const targetBase = (pPrefixSegments.length > 0 ? pPrefixSegments.join('-') + '-' : '') + type + newVal + '-';
 
-      const existingCount = allNodes.filter(n => n.node_label.startsWith(targetBase)).length;
+      const expectedSegmentsLength = pPrefixSegments.length + 2;
+      const existingCount = allNodes.filter(n => 
+        n.node_label.startsWith(targetBase) && 
+        n.node_label.split('-').length === expectedSegmentsLength
+      ).length;
       return `${targetBase}${existingCount + 1}`;
     }
   };
@@ -431,26 +495,31 @@ function App() {
       // Existing Project Actions
       if (!activeChat) return;
 
-      const isSubMode = activeIcons.next;
-      const nodeLabel = generateNodeLabel(contextNode, nodes, isSubMode);
-      const isContentMode = activeIcons.node;
+      const isSubMode = activeIcons.next; // Icon 1 (Down/Child)
+      const isContentBlock = activeIcons.node; // Icon 2 (+ 아이콘: 독립된 빈 블럭)
+      
       const formData = new FormData();
-
       formData.append('chat_id', activeChat.id);
-      let finalParentId = "";
-      if (contextNode) {
-        finalParentId = isSubMode ? contextNode.id : (contextNode.parent_id || "");
-      }
-      formData.append('parent_id', finalParentId);
-      formData.append('node_label', nodeLabel);
+      formData.append('text_content', inputText);
 
-      if (isContentMode) {
+      if (isContentBlock) {
+        // --- 독립 블럭 (Content Node) ---
+        formData.append('reference_node_id', "");
+        formData.append('parent_id', "");
         formData.append('node_type', 'content');
-        formData.append('question_text', '');
-        formData.append('answer_text', inputText);
+        formData.append('node_label', `block-${Date.now()}`); 
       } else {
+        // --- 일반 QA 모드 ---
+        let finalParentId = "";
+        if (contextNode) {
+          finalParentId = isSubMode ? contextNode.id : (contextNode.parent_id || "");
+          formData.append('reference_node_id', contextNode.id); // 항상 기준 노드 ID 전송
+        }
+        formData.append('parent_id', finalParentId);
+        
+        const nodeLabel = generateNodeLabel(contextNode, nodes, isSubMode);
+        formData.append('node_label', nodeLabel);
         formData.append('node_type', 'qa');
-        formData.append('text_content', inputText);
       }
 
       if (selectedImage) formData.append('photo', selectedImage);
@@ -501,8 +570,16 @@ function App() {
     setImagePreviewUrl(null);
   };
 
+  const getDisplayLabel = (label) => {
+    if (!label) return '';
+    if (label.startsWith('B')) return label;
+    if (label.includes('-S')) return label.substring(label.lastIndexOf('-S') + 1);
+    return label;
+  };
+
   const getTagColorClass = (label) => {
     if (!label) return 'tag-gray';
+    if (label.startsWith('B')) return 'tag-blue'; // B로 시작하면 파란색 계열
     // 경로에 -S 가 포함되어 있으면 서브 노드로 간주 (노란색)
     if (label.includes('-S')) return 'tag-yellow';
     return 'tag-red'; // M으로 시작하는 메인 노드 (빨간색)
@@ -619,7 +696,7 @@ function App() {
                                 className={`node-item score-node-item ${selectedNode?.id === node.id ? 'selected' : ''}`}
                                 onClick={() => setSelectedNode(node)}
                               >
-                                <div className={`node-tag ${getTagColorClass(node.node_label)}`}>{node.node_label}</div>
+                                <div className={`node-tag ${getTagColorClass(node.node_label)}`} title={node.node_label}>{getDisplayLabel(node.node_label)}</div>
                                 <div className="node-item-title">{node.node_title}</div>
                                 <ChevronRight size={14} color="#555" />
                               </button>
@@ -644,7 +721,7 @@ function App() {
                         className={`node-item ${selectedNode?.id === node.id ? 'selected' : ''}`}
                         onClick={() => setSelectedNode(node)}
                       >
-                        <div className={`node-tag ${getTagColorClass(node.node_label)}`}>{node.node_label}</div>
+                        <div className={`node-tag ${getTagColorClass(node.node_label)}`} title={node.node_label}>{getDisplayLabel(node.node_label)}</div>
                         <div className="node-item-title">{node.node_title}</div>
                         <ChevronRight size={14} color="#555" />
                       </button>
@@ -692,7 +769,7 @@ function App() {
                         }}
                         onClick={() => setSelectedNode(node)}
                       >
-                        <div className={`node-tag ${getTagColorClass(label)}`}>{label}</div>
+                        <div className={`node-tag ${getTagColorClass(label)}`} title={label}>{getDisplayLabel(label)}</div>
                         <div className="node-item-title">{node.node_title}</div>
                         {hasChildren ? (
                           <button
@@ -740,7 +817,7 @@ function App() {
       </aside>
 
       {/* 2. 메인 컨텐츠 구성 */}
-      <main className="main-content">
+      <main className={`main-content view-${view} mode-${viewMode}`}>
         <header className="top-bar">
           <div className="logo-text">Chat for Edu</div>
           <div className="user-controls">
@@ -782,6 +859,13 @@ function App() {
                   nodes={nodes}
                   selectedNode={selectedNode}
                   onNodeClick={(node) => setSelectedNode(node)}
+                  onDoubleClickNode={(node) => {
+                    setSelectedNode(node);
+                    setViewMode('chat');
+                  }}
+                  onUpdateMetadata={updateNodeMetadata}
+                  onDeleteNode={() => setIsDeleteNodeModalOpen(true)}
+                  onConnectEdge={handleConnectEdge}
                 />
               </div>
             ) : (
@@ -791,7 +875,7 @@ function App() {
                     <div className="node-detail-header">
                       <div className="header-row">
                         <div className="node-info-group">
-                          <span className="node-label-badge">{selectedNode.node_label}</span>
+                          <span className="node-label-badge" title={selectedNode.node_label}>{getDisplayLabel(selectedNode.node_label)}</span>
                           <Star
                             size={20}
                             fill={selectedNode.is_favorite ? "#FFD700" : "none"}
@@ -856,27 +940,29 @@ function App() {
                         </div>
                       )}
                       <div className="question-section">
-                        <div className="section-label">질문</div>
+                        <div className="section-label">{selectedNode.node_type === 'content' ? '메모 내용' : '질문'}</div>
                         <div className="text-box">{selectedNode.question_text}</div>
                       </div>
-                      <div className="answer-section">
-                        <div className="section-label">답변</div>
-                        <div className={`text-box ai-answer ${isGenerating ? 'loading' : ''}`}>
-                          {isGenerating ? (
-                            <div className="ai-loading-inline">
-                              <Loader2 size={18} className="spinning-icon" />
-                              <span>Gemini가 답변을 생성하고 있습니다...</span>
-                            </div>
-                          ) : (
-                            <ReactMarkdown 
-                              remarkPlugins={[remarkMath]} 
-                              rehypePlugins={[rehypeKatex]}
-                            >
-                              {selectedNode.answer_text}
-                            </ReactMarkdown>
-                          )}
+                      {selectedNode.node_type !== 'content' && (
+                        <div className="answer-section">
+                          <div className="section-label">답변</div>
+                          <div className={`text-box ai-answer ${isGenerating ? 'loading' : ''}`}>
+                            {isGenerating ? (
+                              <div className="ai-loading-inline">
+                                <Loader2 size={18} className="spinning-icon" />
+                                <span>Gemini가 답변을 생성하고 있습니다...</span>
+                              </div>
+                            ) : (
+                              <ReactMarkdown 
+                                remarkPlugins={[remarkMath]} 
+                                rehypePlugins={[rehypeKatex]}
+                              >
+                                {selectedNode.answer_text}
+                              </ReactMarkdown>
+                            )}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
 
                   </>
@@ -900,116 +986,117 @@ function App() {
               </div>
             ))}
 
-          {/* 공통 입력창 영역 */}
-          <div className="input-area-wrapper">
-            {imagePreviewUrl && (
-              <div className="image-preview-container">
-                <div className="preview-bubble"><img src={imagePreviewUrl} alt="p" /><button className="remove-image-btn" onClick={clearImage}><X size={14} /></button></div>
+        </section>
+
+        {/* 공통 입력창 영역 */}
+        <div className="input-area-wrapper">
+          {imagePreviewUrl && (
+            <div className="image-preview-container">
+              <div className="preview-bubble"><img src={imagePreviewUrl} alt="p" /><button className="remove-image-btn" onClick={clearImage}><X size={14} /></button></div>
+            </div>
+          )}
+
+          <div className={`input-container ${isGenerating ? 'disabled' : ''}`}>
+            <textarea
+              ref={textareaRef}
+              className="input-field"
+              placeholder={isGenerating ? "답변을 생성하는 중입니다..." : "Chat for Edu에게 물어보기"}
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onPaste={handlePaste}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendMessage();
+                }
+              }}
+              disabled={isGenerating}
+              rows={1}
+            />
+            <div className="input-actions">
+              <div className="input-actions-left">
+                <label style={{ cursor: isGenerating ? 'not-allowed' : 'pointer' }}>
+                  <Paperclip size={20} style={{ opacity: isGenerating ? 0.5 : 1 }} />
+                  <input type="file" style={{ display: 'none' }} onChange={(e) => processImageFile(e.target.files[0])} disabled={isGenerating} />
+                </label>
               </div>
-            )}
-
-            <div className={`input-container ${isGenerating ? 'disabled' : ''}`}>
-              <textarea
-                ref={textareaRef}
-                className="input-field"
-                placeholder={isGenerating ? "답변을 생성하는 중입니다..." : "Chat for Edu에게 물어보기"}
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onPaste={handlePaste}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
-                }}
-                disabled={isGenerating}
-                rows={1}
-              />
-              <div className="input-actions">
-                <div className="input-actions-left">
-                  <label style={{ cursor: isGenerating ? 'not-allowed' : 'pointer' }}>
-                    <Paperclip size={20} style={{ opacity: isGenerating ? 0.5 : 1 }} />
-                    <input type="file" style={{ display: 'none' }} onChange={(e) => processImageFile(e.target.files[0])} disabled={isGenerating} />
-                  </label>
-                </div>
-                <div className="input-actions-right">
-                  {view === 'project' && (
-                    <>
-                      <div className="current-node-context-wrapper">
-                        {isContextSelectorOpen && !isGenerating && (
-                          <div className="context-selector-popup">
-                            <div className="context-popup-header">부모 노드 선택</div>
-                            <div className="context-popup-list">
-                              {nodes.map(n => (
-                                <button
-                                  key={n.id}
-                                  className={`context-list-item ${contextNode?.id === n.id ? 'active' : ''}`}
-                                  onClick={() => {
-                                    setContextNode(n);
-                                    setIsContextSelectorOpen(false);
-                                  }}
-                                >
-                                  <span className="item-label">{n.node_label}</span>
-                                  <span className="item-title">{n.node_title}</span>
-                                </button>
-                              ))}
-                            </div>
+              <div className="input-actions-right">
+                {view === 'project' && (
+                  <>
+                    <div className="current-node-context-wrapper" ref={contextSelectorRef}>
+                      {isContextSelectorOpen && !isGenerating && (
+                        <div className="context-selector-popup">
+                          <div className="context-popup-header">부모 노드 선택</div>
+                          <div className="context-popup-list">
+                            {nodes.map(n => (
+                              <button
+                                key={n.id}
+                                className={`context-list-item ${contextNode?.id === n.id ? 'active' : ''}`}
+                                onClick={() => {
+                                  setContextNode(n);
+                                  setIsContextSelectorOpen(false);
+                                }}
+                              >
+                                <span className="item-label" title={n.node_label}>{getDisplayLabel(n.node_label)}</span>
+                                <span className="item-title">{n.node_title}</span>
+                              </button>
+                            ))}
                           </div>
-                        )}
-                        <button
-                          className="current-node-context-inline clickable"
-                          onClick={() => !isGenerating && setIsContextSelectorOpen(!isContextSelectorOpen)}
-                          disabled={isGenerating}
-                          style={{ opacity: isGenerating ? 0.5 : 1 }}
-                        >
-                          {contextNode?.node_label || 'Root'}
-                        </button>
-                      </div>
-
-                      {selectedNode && (
-                        <>
-                          <button
-                            className={`smart-btn-inline ${activeIcons.next ? 'active' : ''}`}
-                            title="세부 질문"
-                            onClick={() => !isGenerating && toggleSmartIcon('next')}
-                            disabled={isGenerating}
-                          >
-                            <CornerDownRight size={18} />
-                          </button>
-                          <button
-                            className={`smart-btn-inline ${activeIcons.node ? 'active' : ''}`}
-                            title="새 노드"
-                            onClick={() => !isGenerating && toggleSmartIcon('node')}
-                            disabled={isGenerating}
-                          >
-                            <SquarePlus size={18} />
-                          </button>
-                        </>
+                        </div>
                       )}
-
                       <button
-                        className={`smart-btn-inline ${activeIcons.sparkle ? 'active' : ''}`}
-                        title="새로운 시작"
-                        onClick={() => !isGenerating && toggleSmartIcon('sparkle')}
+                        className="current-node-context-inline clickable"
+                        onClick={() => !isGenerating && setIsContextSelectorOpen(!isContextSelectorOpen)}
                         disabled={isGenerating}
+                        style={{ opacity: isGenerating ? 0.5 : 1 }}
                       >
-                        <Sparkles size={18} />
+                        {contextNode?.node_label || 'Root'}
                       </button>
-                    </>
-                  )}
-                  <button 
-                    className="icon-button send-btn-main" 
-                    onClick={handleSendMessage}
-                    disabled={isGenerating || (!inputText.trim() && !selectedImage)}
-                    style={{ opacity: (isGenerating || (!inputText.trim() && !selectedImage)) ? 0.5 : 1 }}
-                  >
-                    {isGenerating ? <Loader2 size={20} className="spinning-icon" /> : <Send size={20} />}
-                  </button>
-                </div>
+                    </div>
+
+                    {selectedNode && (
+                      <>
+                        <button
+                          className={`smart-btn-inline ${activeIcons.next ? 'active' : ''}`}
+                          title="세부 질문"
+                          onClick={() => !isGenerating && toggleSmartIcon('next')}
+                          disabled={isGenerating}
+                        >
+                          <CornerDownRight size={18} />
+                        </button>
+                        <button
+                          className={`smart-btn-inline ${activeIcons.node ? 'active' : ''}`}
+                          title="새 노드"
+                          onClick={() => !isGenerating && toggleSmartIcon('node')}
+                          disabled={isGenerating}
+                        >
+                          <SquarePlus size={18} />
+                        </button>
+                      </>
+                    )}
+
+                    <button
+                      className={`smart-btn-inline ${activeIcons.sparkle ? 'active' : ''}`}
+                      title="새로운 시작"
+                      onClick={() => !isGenerating && toggleSmartIcon('sparkle')}
+                      disabled={isGenerating}
+                    >
+                      <Sparkles size={18} />
+                    </button>
+                  </>
+                )}
+                <button 
+                  className="icon-button send-btn-main" 
+                  onClick={handleSendMessage}
+                  disabled={isGenerating || (!inputText.trim() && !selectedImage)}
+                  style={{ opacity: (isGenerating || (!inputText.trim() && !selectedImage)) ? 0.5 : 1 }}
+                >
+                  {isGenerating ? <Loader2 size={20} className="spinning-icon" /> : <Send size={20} />}
+                </button>
               </div>
             </div>
           </div>
-        </section>
+        </div>
 
         {/* 계정 탈퇴 확인 모달 */}
         {isDeleteModalOpen && (

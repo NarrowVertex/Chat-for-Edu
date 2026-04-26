@@ -312,7 +312,7 @@ body {
   justify-content: flex-start;
   padding: 0; 
   width: 100%;         /* 전체 너비 차지 */
-  overflow-y: auto;     /* 휠 작동을 위해 유지 */
+  overflow: hidden;    /* 내부 컨테이너(채트/트리)가 개별적으로 스크롤 관리 */
   position: relative;
   min-height: 0; 
 }
@@ -362,11 +362,16 @@ body {
 
 .input-area-wrapper {
   width: 100%;
-  padding: 0 20px 20px 20px; /* 하단 여백 약 1cm(28px) 하향 조정 */
-  margin-top: auto;          /* 하단 고정 효과 */
+  max-width: 800px;      /* 이전과 동일하게 가로 폭 제한 추가 */
+  margin: 0 auto;       /* 중앙 정렬 */
+  padding: 0 20px 20px 20px;
   z-index: 5;
-  background: transparent; /* 어두운 그라데이션 제거 */
-  pointer-events: none;      /* 뒤쪽 스크롤 방해 금지 */
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  position: relative;
 }
 
 .input-area-wrapper > * {
@@ -832,15 +837,6 @@ body {
   text-overflow: ellipsis;
 }
 
-/* Image Preview Styles */
-.input-area-wrapper {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  position: relative;
-}
 
 .image-preview-container {
   display: flex;
@@ -1080,6 +1076,13 @@ body {
   color: #ffcc00;
   border: 1px solid rgba(255, 204, 0, 0.3);
   box-shadow: 0 0 10px rgba(255, 204, 0, 0.1);
+}
+
+.tag-blue {
+  background: rgba(78, 168, 222, 0.12);
+  color: #4ea8de;
+  border: 1px solid rgba(78, 168, 222, 0.3);
+  box-shadow: 0 0 10px rgba(78, 168, 222, 0.1);
 }
 
 .node-item-title {
@@ -1482,4 +1485,58 @@ body {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* --- View Specific Layouts --- */
+
+/* Node Mode (Tree Graph): Full-width & Floating Input */
+.mode-node .center-lobby > div:not(.mesh-background) {
+  max-width: none;
+  width: 100%;
+  padding: 0;
+}
+
+.mode-node .input-area-wrapper {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  pointer-events: none;
+}
+
+/* Chat Mode & Home View: Centered (800px) & Integrated Layout */
+.mode-chat .center-lobby > div:not(.mesh-background),
+.view-home .center-lobby > div:not(.mesh-background) {
+  max-width: 800px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.mode-chat .node-detail-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 24px 20px;
+  padding-bottom: 40px; /* Standard padding, no longer needs massive safe area */
+}
+
+.mode-chat .input-area-wrapper,
+.view-home .input-area-wrapper {
+  position: relative; /* 통합형 레이아웃: 대화창이 입력창 직전에서 멈춤 */
+  left: auto;
+  transform: none;
+  margin: 0 auto;
+  pointer-events: auto;
+}
+
+.input-area-wrapper > * {
+  pointer-events: auto;
+}
+
+.view-project .input-container {
+  background: rgba(45, 49, 58, 0.5);
+  backdrop-filter: blur(25px) saturate(200%);
+  -webkit-backdrop-filter: blur(25px) saturate(200%);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.15);
 }
