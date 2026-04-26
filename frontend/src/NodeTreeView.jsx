@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useState } from 'react';
+import { useMemo, useEffect, useState, useRef } from 'react';
 import {
   ReactFlow,
   Background,
@@ -396,12 +396,126 @@ export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubl
 
   const [rfNodes, setNodes, onNodesChange] = useNodesState(layoutedNodes);
   const [rfEdges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);
+  
+  // 드래그 중 델타(이동량) 계산을 위한 참조값
+  const lastPosRef = useRef({ x: 0, y: 0 });
 
   // 데이터(nodes prop)가 변경될 때마다 React Flow 내부 상태 동기화
   useEffect(() => {
     setNodes(layoutedNodes);
     setEdges(layoutedEdges);
   }, [layoutedNodes, layoutedEdges, setNodes, setEdges]);
+
+  // ─── 1. 후손 노드 탐색 로직 (재귀) ───
+  const getSubtreeIds = (nodeId, edges) => {
+    const descendants = [];
+    const queue = [nodeId];
+    const visited = new Set();
+
+    while (queue.length > 0) {
+      const currentId = queue.shift();
+      if (visited.has(currentId)) continue;
+      visited.add(currentId);
+
+      edges.forEach(edge => {
+        if (edge.source === currentId) {
+          descendants.push(edge.target);
+          queue.push(edge.target);
+        }
+      });
+    }
+    return descendants;
+  };
+
+  // ─── 2. 동시 드래그 로직 ───
+  const onNodeDragStart = (event, node) => {
+    // 드래그 시작 시점의 위치 저장
+    lastPosRef.current = { x: node.position.x, y: node.position.y };
+  };
+
+  const onNodeDrag = (event, node) => {
+    const subtreeIds = getSubtreeIds(node.id, rfEdges);
+    if (subtreeIds.length === 0) {
+      lastPosRef.current = { x: node.position.x, y: node.position.y };
+      return;
+    }
+
+    // 이전 프레임 대비 이동량(Delta) 계산
+    const dx = node.position.x - lastPosRef.current.x;
+    const dy = node.position.y - lastPosRef.current.y;
+
+    if (dx === 0 && dy === 0) return;
+
+    // 현재 위치를 다음 프레임을 위한 기준값으로 업데이트
+    lastPosRef.current = { x: node.position.x, y: node.position.y };
+
+    // 모든 후손 노드들을 부모의 이동량만큼 동시 이동
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (subtreeIds.includes(n.id)) {
+          return {
+            ...n,
+            position: { x: n.position.x + dx, y: n.position.y + dy }
+          };
+        }
+        return n;
+      })
+    );
+  };
+
+  // ─── 3. 충돌 감지 및 밀어내기 로직 (onNodeDragStop) ───
+  const onNodeDragStop = (event, node) => {
+    const subtreeIds = [node.id, ...getSubtreeIds(node.id, rfEdges)];
+    
+    const resolveCollisions = (allNodes) => {
+      let changed = false;
+      const nextNodes = [...allNodes];
+      const groupNodes = nextNodes.filter(n => subtreeIds.includes(n.id));
+      
+      nextNodes.forEach((otherNode) => {
+        if (subtreeIds.includes(otherNode.id)) return;
+
+        const isColliding = groupNodes.some(gn => {
+          return (
+            gn.position.x < otherNode.position.x + NODE_WIDTH + 20 &&
+            gn.position.x + NODE_WIDTH + 20 > otherNode.position.x &&
+            gn.position.y < otherNode.position.y + NODE_HEIGHT + 20 &&
+            gn.position.y + NODE_HEIGHT + 20 > otherNode.position.y
+          );
+        });
+
+        if (isColliding) {
+          const otherSubtree = [otherNode.id, ...getSubtreeIds(otherNode.id, rfEdges)];
+          const pushY = (NODE_HEIGHT + 60); 
+          
+          otherSubtree.forEach(oid => {
+            const nodeIdx = nextNodes.findIndex(n => n.id === oid);
+            if (nodeIdx !== -1) {
+              nextNodes[nodeIdx] = {
+                ...nextNodes[nodeIdx],
+                position: {
+                  ...nextNodes[nodeIdx].position,
+                  y: nextNodes[nodeIdx].position.y + pushY
+                }
+              };
+              changed = true;
+            }
+          });
+        }
+      });
+
+      return { nextNodes, changed };
+    };
+
+    let finalNodes = rfNodes;
+    for (let i = 0; i < 5; i++) {
+      const { nextNodes, changed } = resolveCollisions(finalNodes);
+      finalNodes = nextNodes;
+      if (!changed) break;
+    }
+
+    setNodes(finalNodes);
+  };
 
   if (nodes.length === 0) {
     return (
@@ -422,6 +536,9 @@ export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubl
         edges={rfEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDrag={onNodeDrag}
+        onNodeDragStop={onNodeDragStop}
         onConnect={(params) => {
           if (onConnectEdge) onConnectEdge(params);
         }}
@@ -456,3 +573,4 @@ export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubl
     </div>
   );
 }
+

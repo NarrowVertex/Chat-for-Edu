@@ -152,162 +152,98 @@ app.delete('/api/auth/user/:id', async (req, res) => {
 
 // --- 채팅 관련 API ---
 
-async function updateMainNodeLabels(chat_id, connectionObj = null) {
-  const connection = connectionObj || await db.getConnection();
+async function updateMainNodeLabels(chat_id) {
   try {
-    if (!connectionObj) await connection.beginTransaction();
+    const [allNodes] = await db.execute('SELECT * FROM Messages WHERE chat_id = ? ORDER BY created_at ASC', [chat_id]);
+    if (allNodes.length === 0) return;
 
-    const [allNodes] = await connection.execute('SELECT * FROM Messages WHERE chat_id = ? ORDER BY created_at ASC', [chat_id]);
-    
-    // 메인 노드 필터링: M으로 시작하는 메인 노드이거나, 선이 연결되어 있어 번호를 새로 매겨야 하는 독립 노드(B1-1)만 포함
-    const mainNodes = allNodes.filter(n => 
-      (n.node_label.startsWith('M') && !n.node_label.includes('-S')) ||
-      (n.reference_node_id && (n.node_label === 'B1-1' || n.node_label === 'temp-sibling'))
-    );
-    
-    const nodeX = {};
-    const getX = (nodeId) => {
-      if (nodeX[nodeId]) return nodeX[nodeId];
-      const node = allNodes.find(n => n.id === nodeId);
-      if (!node || !node.reference_node_id) {
-        nodeX[nodeId] = 1;
-        return 1;
-      }
-      const x = getX(node.reference_node_id) + 1;
-      nodeX[nodeId] = x;
-      return x;
-    };
+    // 1. 뿌리 노드들 처리 (1세대)
+    const roots = allNodes.filter(n => !n.reference_node_id).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    let queue = [];
 
-    const nodesByPhase = {};
-    let maxPhase = 0;
-    
-    for (const node of mainNodes) {
-      if (node.node_type === 'content' && !node.reference_node_id) continue;
-      
-      const x = getX(node.id);
-      if (!nodesByPhase[x]) nodesByPhase[x] = [];
-      nodesByPhase[x].push(node);
-      if (x > maxPhase) maxPhase = x;
+    for (let i = 0; i < roots.length; i++) {
+      const root = roots[i];
+      // 뿌리 정화
+      await db.execute('UPDATE Messages SET parent_id = NULL WHERE id = ?', [root.id]);
+      const label = (i === 0) ? "M1-1" : `B1-1(${root.id})`;
+      await db.execute('UPDATE Messages SET node_label = ? WHERE id = ?', [label, root.id]);
+      queue.push({ id: root.id, label: label });
     }
-    
-    for (let x = 1; x <= maxPhase; x++) {
-      const phaseNodes = nodesByPhase[x];
-      if (!phaseNodes || phaseNodes.length === 0) continue;
-      
-      phaseNodes.sort((a, b) => {
-        // 1. 부모(Reference Node)의 이름표를 기준으로 먼저 정렬
-        const refA = allNodes.find(n => n.id == a.reference_node_id);
-        const refB = allNodes.find(n => n.id == b.reference_node_id);
-        
-        if (refA && refB) {
-          // 부모 이름표가 다르면 부모 순서대로
-          const cmp = refA.node_label.localeCompare(refB.node_label, undefined, { numeric: true });
-          if (cmp !== 0) return cmp;
-        } else if (refA && !refB) {
-          return 1;
-        } else if (!refA && refB) {
-          return -1;
-        }
-        
-        // 2. 부모가 같거나 둘 다 없으면 생성 시간 순으로
-        return new Date(a.created_at) - new Date(b.created_at);
-      });
-      
-      for (let i = 0; i < phaseNodes.length; i++) {
-        const node = phaseNodes[i];
-        const newLabel = `M${x}-${i + 1}`;
-        const oldLabel = node.node_label;
-        
-        if (newLabel !== oldLabel) {
-          await connection.execute('UPDATE Messages SET node_label = ? WHERE id = ?', [newLabel, node.id]);
-          node.node_label = newLabel;
+
+    // 2. 세대별 순차 처리 (BFS 방식)
+    while (queue.length > 0) {
+      const nextQueue = [];
+      // 현재 세대의 모든 자식들을 수집
+      let allChildren = [];
+      for (const parent of queue) {
+        const children = allNodes.filter(n => n.reference_node_id === parent.id);
+        for (const child of children) {
+          // 관계 판별 (핸들 로직)
+          const isBottom = String(child.parent_id) === String(parent.id);
+          let type, phase, prefix;
           
-          const memoryNode = allNodes.find(n => n.id == node.id);
-          if (memoryNode) memoryNode.node_label = newLabel;
-          
-          // 하단 자식(-S)들도 즉시 부모 이름을 따라가도록 업데이트
-          await connection.execute(
-            'UPDATE Messages SET node_label = CONCAT(?, SUBSTRING(node_label, ?)) WHERE chat_id = ? AND node_label LIKE ?',
-            [newLabel, oldLabel.length + 1, chat_id, `${oldLabel}-%`]
-          );
-          
-          // 메모리 상의 노드들도 동기화 (재귀적 처리를 위해 중요)
-          for (const m of allNodes) {
-             if (m.node_label.startsWith(`${oldLabel}-`)) {
-                m.node_label = newLabel + m.node_label.substring(oldLabel.length);
-             }
+          const lastSegmentRegex = /([MSB])(\d+)-(\d+)(\(\d+\))?$/;
+          const match = parent.label.match(lastSegmentRegex);
+          const [full, pType, pPhase, pInstance, pFamilyId] = match || ["", "M", "1", "1", ""];
+          const pPrefix = parent.label.substring(0, parent.label.length - full.length);
+
+          if (isBottom) {
+            // 하단 연결: Depth 증가 (S1-1)
+            type = "S";
+            phase = 1;
+            prefix = parent.label + "-";
+          } else {
+            // 우측 연결: Phase 증가
+            type = pType;
+            phase = parseInt(pPhase) + 1;
+            prefix = pPrefix;
           }
+          
+          allChildren.push({ 
+            node: child, 
+            parentLabel: parent.label, 
+            prefix, 
+            type, 
+            phase, 
+            familyId: pFamilyId || "" 
+          });
         }
       }
+
+      // 수집된 모든 자식들을 그룹핑하여 전역 순번 부여
+      const groups = {};
+      for (const item of allChildren) {
+        const groupKey = `${item.prefix}${item.type}${item.phase}${item.familyId}`;
+        if (!groups[groupKey]) groups[groupKey] = [];
+        groups[groupKey].push(item);
+      }
+
+      for (const key in groups) {
+        const groupNodes = groups[key];
+        // 정렬: 부모 라벨 순 -> 생성 시간 순
+        groupNodes.sort((a, b) => {
+          const cmp = a.parentLabel.localeCompare(b.parentLabel, undefined, { numeric: true });
+          if (cmp !== 0) return cmp;
+          return new Date(a.node.created_at) - new Date(b.node.created_at);
+        });
+
+        for (let i = 0; i < groupNodes.length; i++) {
+          const item = groupNodes[i];
+          const newLabel = `${item.prefix}${item.type}${item.phase}-${i + 1}${item.familyId}`;
+          
+          // DB 업데이트 (parent_id는 이미 관계 판별 시 사용했으므로 라벨만 업데이트)
+          await db.execute('UPDATE Messages SET node_label = ? WHERE id = ?', [newLabel, item.node.id]);
+          nextQueue.push({ id: item.node.id, label: newLabel });
+        }
+      }
+      queue = nextQueue;
     }
-    
-    if (!connectionObj) await connection.commit();
   } catch (err) {
-    if (!connectionObj) await connection.rollback();
     console.error("updateMainNodeLabels Error:", err);
     throw err;
-  } finally {
-    if (!connectionObj) connection.release();
   }
 }
 
-/**
- * 특정 노드부터 시작하여 그 아래에 달린 모든 노드(형제, 자식)의 이름표를 
- * 현재 그래프 구조(reference_node_id)에 맞게 재귀적으로 동기화합니다.
- */
-async function syncSubTreeLabels(chat_id, startNodeId, startLabel) {
-    const [allNodes] = await db.execute('SELECT * FROM Messages WHERE chat_id = ? ORDER BY created_at ASC', [chat_id]);
-    
-    const syncRecursive = async (nodeId, newLabel) => {
-        // 현재 노드 업데이트
-        await db.execute('UPDATE Messages SET node_label = ? WHERE id = ?', [newLabel, nodeId]);
-
-        // 이 노드를 참조하는 자식/형제들 찾기
-        const children = allNodes.filter(n => n.reference_node_id == nodeId);
-        const siblings = children.filter(c => c.parent_id != nodeId);
-        const subNodes = children.filter(c => c.parent_id == nodeId);
-
-        // 형제 라벨링 (우측 연결)
-        for (let i = 0; i < siblings.length; i++) {
-            const s = siblings[i];
-            let sLabel = "";
-            if (newLabel.includes('-S')) {
-                // 서브 노드의 형제: 버전 증가 (M1-1-S1-1 -> M1-1-S1-2)
-                const lastDashIndex = newLabel.lastIndexOf('-');
-                const prefix = newLabel.substring(0, lastDashIndex + 1);
-                sLabel = `${prefix}${i + 2}`;
-            } else if (newLabel.startsWith('M')) {
-                // 메인 노드의 형제: 단계 증가 (M1-1 -> M2-1)
-                const mMatch = newLabel.match(/^M(\d+)-(\d+)/);
-                if (mMatch) {
-                    const phase = parseInt(mMatch[1]);
-                    sLabel = `M${phase + 1}-${i + 1}`;
-                }
-            } else if (newLabel.startsWith('B')) {
-                // 독립 블럭의 형제: 단계 증가 및 가문 번호 유지 (B1-1(1) -> B2-1(1))
-                const bMatch = newLabel.match(/^B(\d+)-(\d+)\((\d+)\)/);
-                if (bMatch) {
-                    const phase = parseInt(bMatch[1]);
-                    const familyId = bMatch[3];
-                    sLabel = `B${phase + 1}-1(${familyId})`;
-                } else {
-                    // 혹시 매칭 실패 시 안전 장치
-                    sLabel = `${newLabel}-R${i + 1}`;
-                }
-            }
-            await syncRecursive(s.id, sLabel);
-        }
-
-        // 자식 라벨링 (하단 연결)
-        for (let i = 0; i < subNodes.length; i++) {
-            const c = subNodes[i];
-            const cLabel = `${newLabel}-S1-${i + 1}`;
-            await syncRecursive(c.id, cLabel);
-        }
-    };
-
-    await syncRecursive(startNodeId, startLabel);
-}
 
 // 특정 사용자의 채팅 목록 가져오기
 app.get('/api/chats/:userId', async (req, res) => {
@@ -423,12 +359,11 @@ app.patch('/api/nodes/:nodeId', async (req, res) => {
     const nodeId = req.params.nodeId;
     const { node_title, understanding_score, is_favorite, reference_node_id } = req.body;
 
-    let query = 'UPDATE Messages SET ';
-    const fields = [];
-    const values = [];
-
-    const [[nodeInfo]] = await db.execute('SELECT chat_id, node_label FROM Messages WHERE id = ?', [nodeId]);
+    const [[nodeInfo]] = await db.execute('SELECT chat_id FROM Messages WHERE id = ?', [nodeId]);
     if (!nodeInfo) return res.status(404).json({ error: "노드를 찾을 수 없습니다." });
+
+    let fields = [];
+    let values = [];
 
     if (node_title !== undefined) { fields.push('node_title = ?'); values.push(node_title); }
     if (understanding_score !== undefined) { fields.push('understanding_score = ?'); values.push(understanding_score); }
@@ -438,50 +373,19 @@ app.patch('/api/nodes/:nodeId', async (req, res) => {
       fields.push('reference_node_id = ?'); 
       values.push(reference_node_id); 
       
-      // 선 끊기(unlink) 발생 시, 노드 타입에 상관없이 고유한 B1-1(n) 부여
       if (reference_node_id === null) {
-        // 현재 해당 채팅방에 있는 B1-1 계열의 최대 숫자 찾기
-        const [[maxB]] = await db.execute(
-          "SELECT node_label FROM Messages WHERE chat_id = ? AND node_label LIKE 'B1-1(%)'",
-          [nodeInfo.chat_id]
-        );
-        
-        // 정규식으로 숫자 추출 및 다음 번호 결정 (목록을 다 가져와서 체크)
-        const [allB] = await db.execute(
-          "SELECT node_label FROM Messages WHERE chat_id = ? AND node_label REGEXP '^B1-1\\\\([0-9]+\\\\)'",
-          [nodeInfo.chat_id]
-        );
-        let maxNum = 0;
-        allB.forEach(b => {
-          const m = b.node_label.match(/\((\d+)\)/);
-          if (m) maxNum = Math.max(maxNum, parseInt(m[1]));
-        });
-        
-        const nextLabel = `B1-1(${maxNum + 1})`;
-        fields.push('node_label = ?');
-        values.push(nextLabel);
+        fields.push('parent_id = NULL');
       }
     }
 
     if (fields.length === 0) return res.status(400).json({ error: "수정할 내용이 없습니다." });
 
-    query += fields.join(', ') + ' WHERE id = ?';
+    const query = `UPDATE Messages SET ${fields.join(', ')} WHERE id = ?`;
     values.push(nodeId);
     await db.execute(query, values);
 
-    // 연결 관계가 변경된 경우(연결 또는 해제), 전체 재배열을 다시 수행합니다.
     if (reference_node_id !== undefined) {
-      if (nodeInfo) {
-        // 만약 선이 끊어진 것이라면(B1-1이 되었다면), 하위 자식들의 접두사도 B1-1로 바꿔줍니다.
-        if (reference_node_id === null) {
-           const [[finalNode]] = await db.execute('SELECT node_label FROM Messages WHERE id = ?', [nodeId]);
-           const newLabel = finalNode.node_label; // 'B1-1(n)'
-           
-           // 하위 전체 연쇄 업데이트 실행
-           await syncSubTreeLabels(nodeInfo.chat_id, nodeId, newLabel);
-        }
-        await updateMainNodeLabels(nodeInfo.chat_id);
-      }
+      await updateMainNodeLabels(nodeInfo.chat_id);
     }
 
     res.json({ message: "노드가 업데이트되었습니다." });
@@ -490,6 +394,7 @@ app.patch('/api/nodes/:nodeId', async (req, res) => {
     res.status(500).json({ error: "노드 업데이트에 실패했습니다." });
   }
 });
+
 
 // 수동 선 연결 및 트레이스 업데이트
 app.post('/api/nodes/connect', async (req, res) => {
@@ -506,80 +411,57 @@ app.post('/api/nodes/connect', async (req, res) => {
     const sourceNode = sourceRows[0];
     const targetNode = targetRows[0];
 
-    // 0. 타겟 노드가 이미 다른 곳에 연결되어 있는지 확인 (한 노드는 부모가 하나여야 함)
+    // 0. 타겟 노드가 이미 다른 곳에 연결되어 있는지 확인
     if (targetNode.reference_node_id !== null) {
       return res.status(400).json({ error: "이미 연결된 노드입니다. 기존 연결을 먼저 끊어주세요." });
     }
     
+    const [allNodes] = await db.execute('SELECT * FROM Messages WHERE chat_id = ?', [sourceNode.chat_id]);
+    
+    // 신규 라벨 결정 (Rightmost Segment 규칙 적용)
     let newLabel = '';
     const pLabel = sourceNode.node_label;
-    const segments = pLabel.split('-');
-    
-    const [allNodes] = await db.execute('SELECT * FROM Messages WHERE chat_id = ?', [sourceNode.chat_id]);
     
     if (connection_type === 'child') {
       const prefix = `${pLabel}-S1-`;
-      const expectedSegmentsLength = segments.length + 2;
-      
       const sameLevelNodes = allNodes.filter(n => 
-        n.node_label.startsWith(prefix) && 
-        n.node_label.split('-').length === expectedSegmentsLength
+        n.reference_node_id === source_id && 
+        n.node_label.startsWith(prefix)
       );
       newLabel = `${prefix}${sameLevelNodes.length + 1}`;
     } else {
-      const lastPart = segments[segments.length - 2];
-      const type = lastPart.charAt(0);
-      const currentVal = parseInt(lastPart.substring(1));
-      const newVal = currentVal + 1;
+      const lastSegmentRegex = /([MSB])(\d+)-(\d+)(\(\d+\))?$/;
+      const match = pLabel.match(lastSegmentRegex);
       
-      const pPrefixSegments = segments.slice(0, segments.length - 2);
-      const targetBase = (pPrefixSegments.length > 0 ? pPrefixSegments.join('-') + '-' : '') + type + newVal + '-';
-      
-      const expectedSegmentsLength = pPrefixSegments.length + 2;
-      const existingCount = allNodes.filter(n => 
-        n.node_label.startsWith(targetBase) && 
-        n.node_label.split('-').length === expectedSegmentsLength
-      ).length;
-      newLabel = `${targetBase}${existingCount + 1}`;
+      if (match) {
+        const [full, type, phase, instance, familyId] = match;
+        const prefix = pLabel.substring(0, pLabel.length - full.length);
+        const newPhase = parseInt(phase) + 1;
+        const targetBase = `${prefix}${type}${newPhase}-`;
+        
+        const existingCount = allNodes.filter(n => 
+          n.node_label.startsWith(targetBase) && 
+          (familyId ? n.node_label.endsWith(familyId) : !n.node_label.includes('('))
+        ).length;
+        
+        newLabel = `${targetBase}${existingCount + 1}${familyId || ''}`;
+      } else {
+        newLabel = `${pLabel}-R1`;
+      }
     }
     
-    const oldPrefix = targetNode.node_label;
-    const exactPattern = oldPrefix;
-    const likePattern = `${oldPrefix}-%`;
-    const substringStartIndex = oldPrefix.length + 1;
-    
-    // 1. 하위 노드들을 포함하여 연쇄적으로 라벨 앞부분 교체
-    await db.execute(
-      'UPDATE Messages SET node_label = CONCAT(?, SUBSTRING(node_label, ?)) WHERE chat_id = ? AND (node_label = ? OR node_label LIKE ?)',
-      [newLabel, substringStartIndex, sourceNode.chat_id, exactPattern, likePattern]
-    );
-    
-    // 2. 타겟 노드의 기준 노드 및 부모 ID 업데이트
-    // M 노드 간의 연결일 경우, 트리 구조를 유지하기 위해 parent_id도 업데이트합니다.
-    let updateParentId = targetNode.parent_id;
-    if (connection_type === 'child') {
-      updateParentId = source_id;
-    } else {
-      updateParentId = sourceNode.parent_id;
-    }
+    // 1. 타겟 노드의 기준 노드 및 부모 ID 업데이트
+    let updateParentId = connection_type === 'child' ? source_id : sourceNode.parent_id;
 
     await db.execute(
       'UPDATE Messages SET reference_node_id = ?, parent_id = ? WHERE id = ?',
       [source_id, updateParentId, target_id]
     );
 
-    // 3. 타겟 노드가 들고 있던 서브 트리도 새 라벨 접두사에 맞춰 업데이트 (B1-1 -> M... 계열로 변신)
-    // 이 시점에 targetNode.node_label은 이미 DB에서 바뀌었으므로, 바뀐 라벨을 다시 가져옴
-    const [[updatedTarget]] = await db.execute('SELECT node_label FROM Messages WHERE id = ?', [target_id]);
-    const finalNewLabel = updatedTarget.node_label;
-
-    // 하위 전체 연쇄 업데이트 실행 (B계열 소속원들이 다시 M가문의 이름을 받음)
-    await syncSubTreeLabels(sourceNode.chat_id, target_id, finalNewLabel);
-
-    // 메인 노드 재배열 수행
+    // 2. 메인 노드 재배열 수행 (전체 트리 질서 정렬)
     await updateMainNodeLabels(sourceNode.chat_id);
 
-    res.json({ message: "연결 및 라벨 재배열 완료", newLabel: finalNewLabel });
+    res.json({ message: "연결 및 라벨 재배열 완료" });
   } catch (error) {
     console.error("Connect Node Error:", error);
     res.status(500).json({ error: "노드 연결에 실패했습니다." });
@@ -592,46 +474,12 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
     let { chat_id, parent_id, reference_node_id, text_content, node_label, node_type, answer_text } = req.body;
     const photo_url = req.file ? `/uploads/${req.file.filename}` : null;
 
-    // FormData 전송 시 "null" 문자열로 오는 경우 처리
-    if (parent_id === "null" || parent_id === "" || parent_id === undefined) {
-      parent_id = null;
-    }
-    if (reference_node_id === "null" || reference_node_id === "" || reference_node_id === undefined) {
-        reference_node_id = null;
-    }
+    if (parent_id === "null" || parent_id === "" || parent_id === undefined) parent_id = null;
+    if (reference_node_id === "null" || reference_node_id === "" || reference_node_id === undefined) reference_node_id = null;
 
-    // 이름표(node_label) 자동 생성 로직
+    // 이름표(node_label) 자동 생성 로직 (단순화: updateMainNodeLabels가 최종 확정함)
     if (!node_label || node_label === "undefined") {
-      if (!reference_node_id) {
-        // 독립 노드 (B1-1(n) 형식)
-        const [allB] = await db.execute(
-          "SELECT node_label FROM Messages WHERE chat_id = ? AND node_label REGEXP '^B1-1\\\\([0-9]+\\\\)'",
-          [chat_id]
-        );
-        let maxNum = 0;
-        allB.forEach(b => {
-          const m = b.node_label.match(/\((\d+)\)/);
-          if (m) maxNum = Math.max(maxNum, parseInt(m[1]));
-        });
-        node_label = `B1-1(${maxNum + 1})`;
-      } else {
-        const [[refNode]] = await db.execute('SELECT node_label FROM Messages WHERE id = ?', [reference_node_id]);
-        if (refNode) {
-          if (String(parent_id) === String(reference_node_id)) {
-            // 자식 노드 (아래쪽 연결)
-            const [[childCount]] = await db.execute(
-              'SELECT COUNT(*) as count FROM Messages WHERE reference_node_id = ? AND node_label LIKE ?',
-              [reference_node_id, `${refNode.node_label}-S1-%`]
-            );
-            node_label = `${refNode.node_label}-S1-${childCount.count + 1}`;
-          } else {
-            // 형제 노드 (우측 연결)
-            node_label = 'temp-sibling'; // updateMainNodeLabels에서 확정됨
-          }
-        } else {
-          node_label = 'B1-1';
-        }
-      }
+      node_label = reference_node_id ? 'temp-node' : 'B1-1';
     }
 
     // Gemini를 통해 제목과 답변 동시 생성 요청 (노드 확장용)
@@ -690,13 +538,9 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
       [chat_id, parent_id, reference_node_id, 'user', node_label, aiTitle, text_content || '', aiAnswer, photo_url, node_type || 'qa', 1]
     );
 
-    // 독립 메모 블럭인 경우 무조건 B1-1 부여
-    if (node_type === 'content' && !reference_node_id) {
-       // 이미 위에서 M1-1 등으로 계산되었을 수 있으므로 강제 덮어쓰기
-       await db.execute('UPDATE Messages SET node_label = ? WHERE id = ?', ['B1-1', result.insertId]);
-    } else if (node_label && node_label.startsWith('M') && !node_label.includes('-S')) {
-      await updateMainNodeLabels(chat_id);
-    }
+    // 모든 신규 노드 추가 후에는 트리 전체의 정합성과 일련번호 부여를 위해 
+    // 전역 재배열 엔진(updateMainNodeLabels)을 반드시 수행합니다.
+    await updateMainNodeLabels(chat_id);
 
     res.status(201).json({ id: result.insertId, node_title: aiTitle });
   } catch (error) {
@@ -793,107 +637,45 @@ app.delete('/api/chats/:chatId', async (req, res) => {
 
 // 노드 삭제 및 일련번호 정밀 재배열 API
 app.delete('/api/nodes/:nodeId', async (req, res) => {
-  const connection = await db.getConnection();
+  const nodeId = req.params.nodeId;
   try {
-    await connection.beginTransaction();
-    const nodeId = req.params.nodeId;
-
-    // 1. 삭제할 노드 정보 획득
-    const [[targetNode]] = await connection.execute(
-      'SELECT chat_id, parent_id, node_label FROM Messages WHERE id = ?',
+    const [[targetNode]] = await db.execute(
+      'SELECT chat_id FROM Messages WHERE id = ?',
       [nodeId]
     );
 
     if (!targetNode) {
-      await connection.rollback();
       return res.status(404).json({ error: "노드를 찾을 수 없습니다." });
     }
 
-    const { chat_id, parent_id, node_label: oldTargetLabel } = targetNode;
-    console.log(`[자동 삭제 시작] Target: ${oldTargetLabel} (ID: ${nodeId}), ParentID: ${parent_id}`);
+    const { chat_id } = targetNode;
 
-    // 2. 노드 삭제 (CASCADE 설정에 의해 자식들도 삭제됨)
-    await connection.execute('DELETE FROM Messages WHERE id = ?', [nodeId]);
-
-    // 3. 남은 형제 노드들 재배열 (SQL NULL 이슈 해결을 위한 분기 처리)
-    let siblingsQuery;
-    let queryParams;
-    if (parent_id === null || parent_id === "" || parent_id === undefined) {
-      siblingsQuery = 'SELECT id, node_label FROM Messages WHERE chat_id = ? AND parent_id IS NULL';
-      queryParams = [chat_id];
-    } else {
-      siblingsQuery = 'SELECT id, node_label FROM Messages WHERE chat_id = ? AND parent_id = ?';
-      queryParams = [chat_id, parent_id];
-    }
-
-    const [siblings] = await connection.execute(siblingsQuery, queryParams);
-    console.log(`[분석] 재배열 대상 형제 노드 수: ${siblings.length}`);
-
-    // 사용자 정의 정렬 (알파벳-숫자 혼합)
-    siblings.sort((a, b) => a.node_label.localeCompare(b.node_label, undefined, { numeric: true }));
-
-    let currentStepCount = 0;
-    let lastOriginalStepNum = -1;
-    let currentVersionCount = 0;
-
-    for (let i = 0; i < siblings.length; i++) {
-      const sibling = siblings[i];
-      const oldLabel = sibling.node_label;
-      const parts = oldLabel.split('-');
-
-      // 마지막 두 파트 (예: "M4", "1") 분석
-      const typeAndStep = parts[parts.length - 2];
-      const type = typeAndStep.charAt(0); // 'M' or 'S'
-      const stepNum = parseInt(typeAndStep.substring(1));
-
-      // 새로운 스텝 단계인지 판단 (기존 수동 복구 로직 적용)
-      if (stepNum !== lastOriginalStepNum) {
-        currentStepCount++;
-        currentVersionCount = 1;
-        lastOriginalStepNum = stepNum;
-      } else {
-        currentVersionCount++;
+    const getAllDescendantIds = async (id) => {
+      let ids = [id];
+      const [children] = await db.execute('SELECT id FROM Messages WHERE reference_node_id = ?', [id]);
+      for (const child of children) {
+        const descendantIds = await getAllDescendantIds(child.id);
+        ids = ids.concat(descendantIds);
       }
+      return ids;
+    };
 
-      // 접두사 유지하며 새로운 라벨 구성
-      const prefixParts = parts.slice(0, parts.length - 2);
-      const prefix = prefixParts.length > 0 ? prefixParts.join('-') + '-' : '';
-      const newLabel = `${prefix}${type}${currentStepCount}-${currentVersionCount}`;
-
-      if (oldLabel !== newLabel) {
-        console.log(`[자동 재배열] ID: ${sibling.id}, ${oldLabel} -> ${newLabel}`);
-
-        // 1) 본인 라벨 업데이트
-        await connection.execute(
-          'UPDATE Messages SET node_label = ? WHERE id = ?',
-          [newLabel, sibling.id]
-        );
-        // 2) 자식들의 경로 접두사 일괄 치환 (Propagation)
-        // 정확한 매칭을 위해 하이픈(-) 포함하여 REPLACE
-        await connection.execute(
-          `UPDATE Messages SET node_label = REPLACE(node_label, ?, ?) WHERE chat_id = ? AND node_label LIKE ?`,
-          [oldLabel + "-", newLabel + "-", chat_id, oldLabel + "-%"]
-        );
-      }
-    }
-
-    await connection.commit();
+    const allIdsToDelete = await getAllDescendantIds(nodeId);
     
-    // 메인 노드(M) 재배열 로직 통합 (삭제 후 빈자리 채우기 및 정렬 유지)
-    if (oldTargetLabel && oldTargetLabel.startsWith('M') && !oldTargetLabel.includes('-S')) {
-      await updateMainNodeLabels(chat_id);
+    if (allIdsToDelete.length > 0) {
+      const placeholders = allIdsToDelete.map(() => '?').join(',');
+      await db.execute(`DELETE FROM Messages WHERE id IN (${placeholders})`, allIdsToDelete);
     }
 
-    console.log("[자동 삭제 및 재배열 완료]");
-    res.json({ message: "노드 삭제 및 정밀 재배열이 완료되었습니다." });
-  } catch (error) {
-    if (connection) await connection.rollback();
-    console.error("[자동화 오류] Delete & Renumbering Error:", error);
-    res.status(500).json({ error: "노드 삭제 중 서버 오류가 발생했습니다." });
-  } finally {
-    if (connection) connection.release();
+    await updateMainNodeLabels(chat_id);
+    res.json({ success: true, deletedCount: allIdsToDelete.length });
+  } catch (err) {
+    console.error('Delete Node Error:', err);
+    res.status(500).json({ error: `삭제 실패: ${err.message}` });
   }
 });
+
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

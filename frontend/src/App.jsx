@@ -152,7 +152,18 @@ function App() {
     }
   };
 
+  // 앱 초기 로드 시 localStorage에서 사용자 정보 복구 (새로고침 대응)
+  useEffect(() => {
+    const savedUser = localStorage.getItem('currentUser');
+    if (savedUser) {
+      const user = JSON.parse(savedUser);
+      setCurrentUser(user);
+      setView('home');
+    }
+  }, []);
+
   const resetAppState = () => {
+    localStorage.removeItem('currentUser'); // 세션 삭제
     setCurrentUser(null);
     setHistoryItems([]);
     setActiveChat(null);
@@ -209,7 +220,9 @@ function App() {
         return;
       }
       setAuthError('');
-      setCurrentUser({ id: data.id, user_id: loginId });
+      const newUser = { id: data.id, user_id: loginId };
+      localStorage.setItem('currentUser', JSON.stringify(newUser)); // 세션 저장
+      setCurrentUser(newUser);
       setView('home');
     } catch (err) {
       setAuthError('백엔드 서버에 연결할 수 없습니다.');
@@ -229,6 +242,7 @@ function App() {
         return;
       }
       setAuthError('');
+      localStorage.setItem('currentUser', JSON.stringify(data.user)); // 세션 저장
       setCurrentUser(data.user);
       setView('home');
     } catch (err) {
@@ -383,13 +397,15 @@ function App() {
       });
       if (response.ok) {
         setIsDeleteNodeModalOpen(false);
-        // selectedNode를 null로 먼저 지우지 않고, fetchNodes가 완료된 후
-        // 내부 로직에서 "삭제된 노드 → 다음 노드 자동 선택"이 일어나도록 처리
-        setSelectedNode(null); // fetchNodes에서 새로 선택할 수 있도록 초기화
-        await fetchNodes(activeChat.id); // 재배열된 최신 데이터로 화면 갱신
+        setSelectedNode(null); 
+        await fetchNodes(activeChat.id); 
+      } else {
+        const errorData = await response.json();
+        alert(errorData.error || '노드 삭제에 실패했습니다.');
       }
     } catch (err) {
       console.error('Delete Node Error:', err);
+      alert('서버 오류로 인해 노드를 삭제할 수 없습니다.');
     }
   };
 
@@ -412,44 +428,10 @@ function App() {
     }
   };
 
-  const generateNodeLabel = (parent, allNodes, isSub) => {
-    // 1. 초기 상태 (첫 노드)
-    if (!parent || allNodes.length === 0) {
-      const mainNodes = allNodes.filter(n => !n.node_label.includes('-S'));
-      return `M${mainNodes.length + 1}-1`;
-    }
-
-    const pLabel = parent.node_label; // e.g. M1-1 or M1-1-S1-1
-    const segments = pLabel.split('-'); // ["M1", "1"] or ["M1", "1", "S1", "1"]
-
-    if (isSub) {
-      // --- 세부 질문 모드 (Detailed: 새로운 뎁스는 항상 S1로 시작) ---
-      const prefix = `${pLabel}-S1-`; // 무조건 새로운 깊이는 S1로 시작
-      const expectedSegmentsLength = segments.length + 2;
-      const sameLevelNodes = allNodes.filter(n => 
-        n.node_label.startsWith(prefix) && 
-        n.node_label.split('-').length === expectedSegmentsLength
-      );
-      return `${prefix}${sameLevelNodes.length + 1}`;
-    } else {
-      // --- 일반 질문 모드 (General: 단계 증가 및 버전 관리) ---
-      // 마지막 세그먼트 (M1, S1 등) 분석
-      const lastPart = segments[segments.length - 2];
-      const type = lastPart.charAt(0); // 'M' or 'S'
-      const currentVal = parseInt(lastPart.substring(1));
-      const newVal = currentVal + 1;
-
-      // 접두사 유지 (M1-1-S1-1 -> M1-1)
-      const pPrefixSegments = segments.slice(0, segments.length - 2);
-      const targetBase = (pPrefixSegments.length > 0 ? pPrefixSegments.join('-') + '-' : '') + type + newVal + '-';
-
-      const expectedSegmentsLength = pPrefixSegments.length + 2;
-      const existingCount = allNodes.filter(n => 
-        n.node_label.startsWith(targetBase) && 
-        n.node_label.split('-').length === expectedSegmentsLength
-      ).length;
-      return `${targetBase}${existingCount + 1}`;
-    }
+  const generateNodeLabel = (parent, isSub) => {
+    // 이제 백엔드에서 모든 라벨링을 전담하므로, 프론트엔드에서는 
+    // 생성 전 임시 표시용 자리표시자만 반환합니다.
+    return "...";
   };
 
   const handleSendMessage = async () => {
@@ -459,9 +441,8 @@ function App() {
     setIsGenerating(true);
 
     try {
-      // Case: 3rd Icon (New Project) or view === 'home'
       if (activeIcons.sparkle || view === 'home') {
-        // 즉각적인 화면 전환 피드백
+        // 새 프로젝트 생성 로직 (유지)
         setView('project');
         setNodes([]);
         setActiveChat({ id: 'temp', title: '분석 중...' });
@@ -487,38 +468,33 @@ function App() {
         } else {
           const errorData = await response.json();
           alert(errorData.error || '채팅 생성에 실패했습니다.');
-          setView('home'); // 실패 시 홈으로 복구
+          setView('home');
         }
         return;
       }
 
-      // Existing Project Actions
       if (!activeChat) return;
 
-      const isSubMode = activeIcons.next; // Icon 1 (Down/Child)
-      const isContentBlock = activeIcons.node; // Icon 2 (+ 아이콘: 독립된 빈 블럭)
+      const isSubMode = activeIcons.next; 
+      const isContentBlock = activeIcons.node; 
       
       const formData = new FormData();
       formData.append('chat_id', activeChat.id);
       formData.append('text_content', inputText);
 
       if (isContentBlock) {
-        // --- 독립 블럭 (Content Node) ---
         formData.append('reference_node_id', "");
         formData.append('parent_id', "");
         formData.append('node_type', 'content');
-        formData.append('node_label', `block-${Date.now()}`); 
+        formData.append('node_label', 'B1-1'); 
       } else {
-        // --- 일반 QA 모드 ---
         let finalParentId = "";
         if (contextNode) {
           finalParentId = isSubMode ? contextNode.id : (contextNode.parent_id || "");
-          formData.append('reference_node_id', contextNode.id); // 항상 기준 노드 ID 전송
+          formData.append('reference_node_id', contextNode.id);
         }
         formData.append('parent_id', finalParentId);
-        
-        const nodeLabel = generateNodeLabel(contextNode, nodes, isSubMode);
-        formData.append('node_label', nodeLabel);
+        formData.append('node_label', '...'); // 서버에서 확정함
         formData.append('node_type', 'qa');
       }
 
@@ -534,14 +510,15 @@ function App() {
         setInputText('');
         clearImage();
         setActiveIcons({ next: false, node: false, sparkle: false });
-        fetchNodes(activeChat.id, data.id);
+        // 데이터 전송 후 반드시 서버로부터 최신 라벨이 포함된 노드 목록을 가져옴
+        await fetchNodes(activeChat.id, data.id);
       } else {
         const errorData = await response.json();
         alert(errorData.error || '답변 생성에 실패했습니다.');
       }
     } catch (err) {
       console.error('Send Message Error:', err);
-      alert('서버 연결에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      alert('서버 연결에 실패했습니다.');
     } finally {
       setIsGenerating(false);
     }
