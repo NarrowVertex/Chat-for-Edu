@@ -274,14 +274,14 @@ function App() {
     }));
   };
 
-  const updateNodeMetadata = async (nodeId, updates) => {
+  const updateNodeMetadata = async (nodeId, updates, skipFetch = false) => {
     try {
       const response = await fetch(`http://localhost:5000/api/nodes/${nodeId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates)
       });
-      if (response.ok) {
+      if (response.ok && !skipFetch) {
         // 선 끊기/연결 등 큰 변화가 있을 때는 확실히 await 하여 순서를 보장
         await fetchNodes(activeChat.id); 
       }

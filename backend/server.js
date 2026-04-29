@@ -368,6 +368,8 @@ app.patch('/api/nodes/:nodeId', async (req, res) => {
     if (node_title !== undefined) { fields.push('node_title = ?'); values.push(node_title); }
     if (understanding_score !== undefined) { fields.push('understanding_score = ?'); values.push(understanding_score); }
     if (is_favorite !== undefined) { fields.push('is_favorite = ?'); values.push(is_favorite); }
+    if (position_x !== undefined) { fields.push('position_x = ?'); values.push(position_x); }
+    if (position_y !== undefined) { fields.push('position_y = ?'); values.push(position_y); }
     
     if (reference_node_id !== undefined) { 
       fields.push('reference_node_id = ?'); 
