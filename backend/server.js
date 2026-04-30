@@ -357,7 +357,7 @@ app.get('/api/chats/:chatId/nodes', async (req, res) => {
 app.patch('/api/nodes/:nodeId', async (req, res) => {
   try {
     const nodeId = req.params.nodeId;
-    const { node_title, understanding_score, is_favorite, reference_node_id } = req.body;
+    const { node_title, understanding_score, is_favorite, reference_node_id, position_x, position_y } = req.body;
 
     const [[nodeInfo]] = await db.execute('SELECT chat_id FROM Messages WHERE id = ?', [nodeId]);
     if (!nodeInfo) return res.status(404).json({ error: "노드를 찾을 수 없습니다." });
