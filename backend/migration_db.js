@@ -1,11 +1,13 @@
 const mysql = require('mysql2/promise');
+require('dotenv').config();
 
 async function migrate() {
     const connection = await mysql.createConnection({
-        host: 'localhost',
-        user: 'root',
-        password: 'your_password',
-        database: 'gemini_db'
+        host: process.env.DB_HOST,
+        port: process.env.DB_PORT,
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_NAME
     });
 
     try {
@@ -14,11 +16,10 @@ async function migrate() {
         // 1. 새로운 컬럼들 추가 (기존 데이터 유지)
         await connection.query(`
             ALTER TABLE Messages 
-            ADD COLUMN reference_node_id INT DEFAULT NULL AFTER node_type,
             ADD COLUMN position_x FLOAT DEFAULT NULL AFTER reference_node_id,
             ADD COLUMN position_y FLOAT DEFAULT NULL AFTER position_x;
         `);
-        console.log('컬럼 추가 완료: reference_node_id, position_x, position_y');
+        console.log('컬럼 추가 완료: position_x, position_y');
 
         // 2. 새로운 외래 키 제약 조건 설정
         await connection.query(`
