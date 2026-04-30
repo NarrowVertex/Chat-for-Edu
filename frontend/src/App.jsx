@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  Menu, Plus, Compass, Sparkles, Mic, Paperclip, MessageSquare, X,
+  Menu, Plus, Compass, Sparkles, Mic, Paperclip, MessageSquare, MessageCircle, X,
   ArrowLeft, Search, Share2, Star, Edit3, RotateCcw, ThumbsUp, ThumbsDown,
   MoreVertical, ChevronRight, ChevronDown, Hash, Send, ExternalLink, CornerDownRight, SquarePlus, Trash2, Loader2
 } from 'lucide-react';
@@ -68,6 +68,75 @@ function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const textareaRef = useRef(null);
   const contextSelectorRef = useRef(null);
+
+  // --- Quiz 관련 상태 ---
+  const [quizConfig, setQuizConfig] = useState({
+    types: {
+      ox: 0,
+      multiple: 0,
+      short: 0,
+      descriptive: 0
+    },
+    difficulty: '하', // 응용도
+    includeCalculation: false,
+    selectedNodeIds: []
+  });
+
+  const totalQuizCount = Object.values(quizConfig.types).reduce((a, b) => a + b, 0);
+
+  const toggleNodeSelection = (nodeId) => {
+    setQuizConfig(prev => ({
+      ...prev,
+      selectedNodeIds: prev.selectedNodeIds.includes(nodeId)
+        ? prev.selectedNodeIds.filter(id => id !== nodeId)
+        : [...prev.selectedNodeIds, nodeId]
+    }));
+  };
+
+  const selectAllNodes = () => {
+    setQuizConfig(prev => ({
+      ...prev,
+      selectedNodeIds: nodes.map(n => n.id)
+    }));
+  };
+
+  const deselectAllNodes = () => {
+    setQuizConfig(prev => ({
+      ...prev,
+      selectedNodeIds: []
+    }));
+  };
+
+  // 노드 목록이 로드되면 자동으로 '전체 선택'이 기본값이 되도록 설정
+  useEffect(() => {
+    if (nodes.length > 0 && quizConfig.selectedNodeIds.length === 0) {
+      setQuizConfig(prev => ({
+        ...prev,
+        selectedNodeIds: nodes.map(n => n.id)
+      }));
+    }
+  }, [nodes]);
+
+  const handleQuizTypeChange = (type, delta) => {
+    setQuizConfig(prev => {
+      const newValue = Math.max(0, prev.types[type] + delta);
+      const currentTotal = Object.values(prev.types).reduce((a, b) => a + b, 0);
+      const newTotal = currentTotal - prev.types[type] + newValue;
+
+      if (newTotal > 20) {
+        alert("최대 20문제까지만 생성 가능합니다.");
+        return prev;
+      }
+
+      return {
+        ...prev,
+        types: {
+          ...prev.types,
+          [type]: newValue
+        }
+      };
+    });
+  };
 
   // 입력창 자동 높이 조절
   useEffect(() => {
@@ -631,6 +700,10 @@ function App() {
                 <div className="view-mode-icon"><Compass size={20} /></div>
                 <span>node</span>
               </button>
+              <button className={`view-mode-btn ${viewMode === 'quiz' ? 'active' : ''}`} onClick={() => setViewMode('quiz')}>
+                <div className="view-mode-icon"><MessageCircle size={20} /></div>
+                <span>quiz</span>
+              </button>
             </div>
 
             <div className="node-list-tabs">
@@ -826,7 +899,6 @@ function App() {
           ) : (
             /* 노드 상세 화면 (Project View) */
             viewMode === 'node' ? (
-              /* 트리 시각화 뷰 (React Flow) - 완전 널짜 채움 */
               <div style={{
                 position: 'absolute',
                 top: 0, left: 0, right: 0, bottom: 0,
@@ -844,6 +916,149 @@ function App() {
                   onDeleteNode={() => setIsDeleteNodeModalOpen(true)}
                   onConnectEdge={handleConnectEdge}
                 />
+              </div>
+            ) : viewMode === 'quiz' ? (
+              <div className="quiz-container fade-up-element">
+                <div className="quiz-setup-card-v3 glass-panel-v3">
+                  <div className="quiz-setup-header-v3">
+                    <div className="quiz-badge-v3">QUIZ MODE</div>
+                    <h2>학습 퀴즈 설정</h2>
+                    <p>학습한 내용을 점검하기 위한 맞춤형 문제를 구성하세요.</p>
+                  </div>
+
+                  <div className="quiz-setup-grid-v3">
+                    {/* Column 1: 출제 범위 (캡슐 UI) */}
+                    <div className="setup-col-v3">
+                      <div className="col-title-v3">출제 범위</div>
+                        <label className="bulk-check-v3">
+                          <div className="checkbox-wrapper-v3">
+                            <input 
+                              type="checkbox" 
+                              id="bulk-select-quiz"
+                              checked={nodes.length > 0 && quizConfig.selectedNodeIds.length === nodes.length}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setQuizConfig(prev => ({ ...prev, selectedNodeIds: nodes.map(n => n.id) }));
+                                } else {
+                                  setQuizConfig(prev => ({ ...prev, selectedNodeIds: [] }));
+                                }
+                              }}
+                            />
+                            <div className="custom-check-v3"></div>
+                          </div>
+                          <span>전체 선택</span>
+                        </label>
+                        <div className="capsule-frame-v3">
+                          <div className="capsule-scroll-v3">
+                            {nodes.length > 0 ? (
+                              nodes.map(node => (
+                                <div 
+                                  key={node.id} 
+                                  className={`node-card-v3 ${quizConfig.selectedNodeIds.includes(node.id) ? 'active' : ''}`} 
+                                  onClick={() => toggleNodeSelection(node.id)}
+                                >
+                                  <div className="checkbox-wrapper-v3">
+                                    <input
+                                      type="checkbox"
+                                      checked={quizConfig.selectedNodeIds.includes(node.id)}
+                                      onChange={() => {}} // onClick in parent div handles this
+                                    />
+                                    <div className="custom-check-v3"></div>
+                                  </div>
+                                  <div className="node-info-v3">
+                                    <span className="n-label-v3">{getDisplayLabel(node.node_label)}</span>
+                                    <span className="n-title-v3">{node.node_title}</span>
+                                  </div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="empty-msg-v3">등록된 노드가 없습니다.</div>
+                            )}
+                          </div>
+                        </div>
+                    </div>
+
+                    {/* Column 2: 문제 유형 및 개수 */}
+                    <div className="setup-col-v3">
+                      <div className="col-title-v3">문제 유형 및 개수</div>
+                      <div className="total-sum-display-v3">
+                        전체 문제: <span className={totalQuizCount > 0 ? 'highlight' : ''}>{totalQuizCount}</span> / 20 개
+                      </div>
+                      <div className="type-controls-v3">
+                        <div className="type-row-v3">
+                          <span>O,X 문제:</span>
+                          <div className="counter-v3">
+                            <button onClick={() => handleQuizTypeChange('ox', -1)}>-</button>
+                            <span className="count">{quizConfig.types.ox}</span>
+                            <button onClick={() => handleQuizTypeChange('ox', 1)}>+</button>
+                          </div>
+                          <span className="unit">개</span>
+                        </div>
+                        <div className="type-row-v3">
+                          <span>객관식:</span>
+                          <div className="counter-v3">
+                            <button onClick={() => handleQuizTypeChange('multiple', -1)}>-</button>
+                            <span className="count">{quizConfig.types.multiple}</span>
+                            <button onClick={() => handleQuizTypeChange('multiple', 1)}>+</button>
+                          </div>
+                          <span className="unit">개</span>
+                        </div>
+
+                        {/* 계산 문제 포함 (주관식/서술형 전용) */}
+                        <label className="calc-toggle-v3">
+                          <div className="checkbox-wrapper-v3">
+                            <input
+                              type="checkbox"
+                              checked={quizConfig.includeCalculation}
+                              onChange={(e) => setQuizConfig({ ...quizConfig, includeCalculation: e.target.checked })}
+                            />
+                            <div className="custom-check-v3"></div>
+                          </div>
+                          <span>계산 문제 포함</span>
+                        </label>
+
+                        <div className="type-row-v3">
+                          <span>주관식:</span>
+                          <div className="counter-v3">
+                            <button onClick={() => handleQuizTypeChange('short', -1)}>-</button>
+                            <span className="count">{quizConfig.types.short}</span>
+                            <button onClick={() => handleQuizTypeChange('short', 1)}>+</button>
+                          </div>
+                          <span className="unit">개</span>
+                        </div>
+                        <div className="type-row-v3">
+                          <span>서술형:</span>
+                          <div className="counter-v3">
+                            <button onClick={() => handleQuizTypeChange('descriptive', -1)}>-</button>
+                            <span className="count">{quizConfig.types.descriptive}</span>
+                            <button onClick={() => handleQuizTypeChange('descriptive', 1)}>+</button>
+                          </div>
+                          <span className="unit">개</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Column 3: 난이도 */}
+                    <div className="setup-col-v3">
+                      <div className="col-title-v3">난이도</div>
+                      <div className="difficulty-vertical-v3">
+                        <button className={`diff-btn-v3 low ${quizConfig.difficulty === '하' ? 'active' : ''}`} onClick={() => setQuizConfig({ ...quizConfig, difficulty: '하' })}>하</button>
+                        <button className={`diff-btn-v3 mid ${quizConfig.difficulty === '중' ? 'active' : ''}`} onClick={() => setQuizConfig({ ...quizConfig, difficulty: '중' })}>중</button>
+                        <button className={`diff-btn-v3 high ${quizConfig.difficulty === '상' ? 'active' : ''}`} onClick={() => setQuizConfig({ ...quizConfig, difficulty: '상' })}>상</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="quiz-footer-v3">
+                    <button 
+                      className="start-btn-v3" 
+                      disabled={totalQuizCount === 0 || quizConfig.selectedNodeIds.length === 0}
+                      onClick={() => alert('학습 데이터를 분석하여 퀴즈를 생성합니다.')}
+                    >
+                      생성하기
+                    </button>
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="node-detail-container fade-up-element">
@@ -966,114 +1181,116 @@ function App() {
         </section>
 
         {/* 공통 입력창 영역 */}
-        <div className="input-area-wrapper">
-          {imagePreviewUrl && (
-            <div className="image-preview-container">
-              <div className="preview-bubble"><img src={imagePreviewUrl} alt="p" /><button className="remove-image-btn" onClick={clearImage}><X size={14} /></button></div>
-            </div>
-          )}
-
-          <div className={`input-container ${isGenerating ? 'disabled' : ''}`}>
-            <textarea
-              ref={textareaRef}
-              className="input-field"
-              placeholder={isGenerating ? "답변을 생성하는 중입니다..." : "Chat for Edu에게 물어보기"}
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onPaste={handlePaste}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSendMessage();
-                }
-              }}
-              disabled={isGenerating}
-              rows={1}
-            />
-            <div className="input-actions">
-              <div className="input-actions-left">
-                <label style={{ cursor: isGenerating ? 'not-allowed' : 'pointer' }}>
-                  <Paperclip size={20} style={{ opacity: isGenerating ? 0.5 : 1 }} />
-                  <input type="file" style={{ display: 'none' }} onChange={(e) => processImageFile(e.target.files[0])} disabled={isGenerating} />
-                </label>
+        {viewMode !== 'quiz' && (
+          <div className="input-area-wrapper">
+            {imagePreviewUrl && (
+              <div className="image-preview-container">
+                <div className="preview-bubble"><img src={imagePreviewUrl} alt="p" /><button className="remove-image-btn" onClick={clearImage}><X size={14} /></button></div>
               </div>
-              <div className="input-actions-right">
-                {view === 'project' && (
-                  <>
-                    <div className="current-node-context-wrapper" ref={contextSelectorRef}>
-                      {isContextSelectorOpen && !isGenerating && (
-                        <div className="context-selector-popup">
-                          <div className="context-popup-header">부모 노드 선택</div>
-                          <div className="context-popup-list">
-                            {nodes.map(n => (
-                              <button
-                                key={n.id}
-                                className={`context-list-item ${contextNode?.id === n.id ? 'active' : ''}`}
-                                onClick={() => {
-                                  setContextNode(n);
-                                  setIsContextSelectorOpen(false);
-                                }}
-                              >
-                                <span className="item-label" title={n.node_label}>{getDisplayLabel(n.node_label)}</span>
-                                <span className="item-title">{n.node_title}</span>
-                              </button>
-                            ))}
+            )}
+
+            <div className={`input-container ${isGenerating ? 'disabled' : ''}`}>
+              <textarea
+                ref={textareaRef}
+                className="input-field"
+                placeholder={isGenerating ? "답변을 생성하는 중입니다..." : "Chat for Edu에게 물어보기"}
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onPaste={handlePaste}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage();
+                  }
+                }}
+                disabled={isGenerating}
+                rows={1}
+              />
+              <div className="input-actions">
+                <div className="input-actions-left">
+                  <label style={{ cursor: isGenerating ? 'not-allowed' : 'pointer' }}>
+                    <Paperclip size={20} style={{ opacity: isGenerating ? 0.5 : 1 }} />
+                    <input type="file" style={{ display: 'none' }} onChange={(e) => processImageFile(e.target.files[0])} disabled={isGenerating} />
+                  </label>
+                </div>
+                <div className="input-actions-right">
+                  {view === 'project' && (
+                    <>
+                      <div className="current-node-context-wrapper" ref={contextSelectorRef}>
+                        {isContextSelectorOpen && !isGenerating && (
+                          <div className="context-selector-popup">
+                            <div className="context-popup-header">부모 노드 선택</div>
+                            <div className="context-popup-list">
+                              {nodes.map(n => (
+                                <button
+                                  key={n.id}
+                                  className={`context-list-item ${contextNode?.id === n.id ? 'active' : ''}`}
+                                  onClick={() => {
+                                    setContextNode(n);
+                                    setIsContextSelectorOpen(false);
+                                  }}
+                                >
+                                  <span className="item-label" title={n.node_label}>{getDisplayLabel(n.node_label)}</span>
+                                  <span className="item-title">{n.node_title}</span>
+                                </button>
+                              ))}
+                            </div>
                           </div>
-                        </div>
+                        )}
+                        <button
+                          className="current-node-context-inline clickable"
+                          onClick={() => !isGenerating && setIsContextSelectorOpen(!isContextSelectorOpen)}
+                          disabled={isGenerating}
+                          style={{ opacity: isGenerating ? 0.5 : 1 }}
+                        >
+                          {contextNode?.node_label || 'Root'}
+                        </button>
+                      </div>
+
+                      {selectedNode && (
+                        <>
+                          <button
+                            className={`smart-btn-inline ${activeIcons.next ? 'active' : ''}`}
+                            title="세부 질문"
+                            onClick={() => !isGenerating && toggleSmartIcon('next')}
+                            disabled={isGenerating}
+                          >
+                            <CornerDownRight size={18} />
+                          </button>
+                          <button
+                            className={`smart-btn-inline ${activeIcons.node ? 'active' : ''}`}
+                            title="새 노드"
+                            onClick={() => !isGenerating && toggleSmartIcon('node')}
+                            disabled={isGenerating}
+                          >
+                            <SquarePlus size={18} />
+                          </button>
+                        </>
                       )}
+
                       <button
-                        className="current-node-context-inline clickable"
-                        onClick={() => !isGenerating && setIsContextSelectorOpen(!isContextSelectorOpen)}
+                        className={`smart-btn-inline ${activeIcons.sparkle ? 'active' : ''}`}
+                        title="새로운 시작"
+                        onClick={() => !isGenerating && toggleSmartIcon('sparkle')}
                         disabled={isGenerating}
-                        style={{ opacity: isGenerating ? 0.5 : 1 }}
                       >
-                        {contextNode?.node_label || 'Root'}
+                        <Sparkles size={18} />
                       </button>
-                    </div>
-
-                    {selectedNode && (
-                      <>
-                        <button
-                          className={`smart-btn-inline ${activeIcons.next ? 'active' : ''}`}
-                          title="세부 질문"
-                          onClick={() => !isGenerating && toggleSmartIcon('next')}
-                          disabled={isGenerating}
-                        >
-                          <CornerDownRight size={18} />
-                        </button>
-                        <button
-                          className={`smart-btn-inline ${activeIcons.node ? 'active' : ''}`}
-                          title="새 노드"
-                          onClick={() => !isGenerating && toggleSmartIcon('node')}
-                          disabled={isGenerating}
-                        >
-                          <SquarePlus size={18} />
-                        </button>
-                      </>
-                    )}
-
-                    <button
-                      className={`smart-btn-inline ${activeIcons.sparkle ? 'active' : ''}`}
-                      title="새로운 시작"
-                      onClick={() => !isGenerating && toggleSmartIcon('sparkle')}
-                      disabled={isGenerating}
-                    >
-                      <Sparkles size={18} />
-                    </button>
-                  </>
-                )}
-                <button 
-                  className="icon-button send-btn-main" 
-                  onClick={handleSendMessage}
-                  disabled={isGenerating || (!inputText.trim() && !selectedImage)}
-                  style={{ opacity: (isGenerating || (!inputText.trim() && !selectedImage)) ? 0.5 : 1 }}
-                >
-                  {isGenerating ? <Loader2 size={20} className="spinning-icon" /> : <Send size={20} />}
-                </button>
+                    </>
+                  )}
+                  <button 
+                    className="icon-button send-btn-main" 
+                    onClick={handleSendMessage}
+                    disabled={isGenerating || (!inputText.trim() && !selectedImage)}
+                    style={{ opacity: (isGenerating || (!inputText.trim() && !selectedImage)) ? 0.5 : 1 }}
+                  >
+                    {isGenerating ? <Loader2 size={20} className="spinning-icon" /> : <Send size={20} />}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* 계정 탈퇴 확인 모달 */}
         {isDeleteModalOpen && (

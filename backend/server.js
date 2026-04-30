@@ -8,9 +8,9 @@ const fs = require('fs');
 const multer = require('multer');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// Gemini API 초기화 (안정적인 2.5 Flash-Lite 모델 사용)
+// Gemini API 초기화 (안정적인 1.5 Flash 모델 사용)
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 // 이미지 데이터를 Gemini API용 포맷으로 변환하는 함수
 function fileToGenerativePart(path, mimeType) {
