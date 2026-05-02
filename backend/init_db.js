@@ -59,6 +59,8 @@ async function init() {
         is_favorite BOOLEAN DEFAULT FALSE,
         node_type ENUM('qa', 'content') DEFAULT 'qa',
         reference_node_id INT DEFAULT NULL,
+        position_x FLOAT DEFAULT NULL,
+        position_y FLOAT DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (chat_id) REFERENCES Chats(id) ON DELETE CASCADE,
         FOREIGN KEY (parent_id) REFERENCES Messages(id) ON DELETE CASCADE,

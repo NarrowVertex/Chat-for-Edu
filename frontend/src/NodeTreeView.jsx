@@ -311,9 +311,14 @@ const getLayoutedElements = (flowNodes, flowEdges) => {
   // 3. 플랫 배열로 다시 변환
   const layoutedNodes = flowNodes.map(n => {
     const layoutInfo = nodeMap[n.id].position;
+    const existingX = n.data.position_x;
+    const existingY = n.data.position_y;
+    
     return {
       ...n,
-      position: layoutInfo || { x: 0, y: 0 },
+      position: (existingX !== null && existingY !== null) 
+        ? { x: existingX, y: existingY } 
+        : (layoutInfo || { x: 0, y: 0 }),
       sourcePosition: Position.Bottom,
       targetPosition: Position.Top, // 미사용 (Left/Right 직접 사용)
     };
@@ -345,8 +350,14 @@ const buildFlowData = (nodes, selectedNode, onNodeClick, onDoubleClickNode, onUp
         onClick: () => onNodeClick(node),
         onDoubleClick: () => onDoubleClickNode && onDoubleClickNode(node),
         onUpdate: onUpdateMetadata,
-        onDelete: onDeleteNode
+        onDelete: onDeleteNode,
+        position_x: node.position_x,
+        position_y: node.position_y
       },
+      position: { 
+        x: node.position_x !== null ? node.position_x : 0, 
+        y: node.position_y !== null ? node.position_y : 0 
+      }
     };
   });
 
@@ -515,6 +526,19 @@ export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubl
     }
 
     setNodes(finalNodes);
+
+    // ─── 4. 변경된 좌표 백엔드 저장 ───
+    // 드래그된 그룹(노드 및 후손)의 최종 좌표를 서버에 반영
+    finalNodes.forEach(fn => {
+      if (subtreeIds.includes(fn.id)) {
+        if (onUpdateMetadata) {
+          onUpdateMetadata(fn.id, {
+            position_x: fn.position.x,
+            position_y: fn.position.y
+          }, true);
+        }
+      }
+    });
   };
 
   if (nodes.length === 0) {

@@ -357,7 +357,7 @@ app.get('/api/chats/:chatId/nodes', async (req, res) => {
 app.patch('/api/nodes/:nodeId', async (req, res) => {
   try {
     const nodeId = req.params.nodeId;
-    const { node_title, understanding_score, is_favorite, reference_node_id } = req.body;
+    const { node_title, understanding_score, is_favorite, reference_node_id, position_x, position_y } = req.body;
 
     const [[nodeInfo]] = await db.execute('SELECT chat_id FROM Messages WHERE id = ?', [nodeId]);
     if (!nodeInfo) return res.status(404).json({ error: "노드를 찾을 수 없습니다." });
@@ -368,6 +368,8 @@ app.patch('/api/nodes/:nodeId', async (req, res) => {
     if (node_title !== undefined) { fields.push('node_title = ?'); values.push(node_title); }
     if (understanding_score !== undefined) { fields.push('understanding_score = ?'); values.push(understanding_score); }
     if (is_favorite !== undefined) { fields.push('is_favorite = ?'); values.push(is_favorite); }
+    if (position_x !== undefined) { fields.push('position_x = ?'); values.push(position_x); }
+    if (position_y !== undefined) { fields.push('position_y = ?'); values.push(position_y); }
     
     if (reference_node_id !== undefined) { 
       fields.push('reference_node_id = ?'); 
