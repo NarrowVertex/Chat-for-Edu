@@ -350,9 +350,21 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates)
       });
-      if (response.ok && !skipFetch) {
-        // 선 끊기/연결 등 큰 변화가 있을 때는 확실히 await 하여 순서를 보장
-        await fetchNodes(activeChat.id); 
+      if (response.ok) {
+        // 로컬 상태 즉시 동기화 (드래그 좌표, 별점, 이해도 등)
+        const updateItem = (prev) => {
+          if (!prev) return prev;
+          return prev.id === Number(nodeId) ? { ...prev, ...updates } : prev;
+        };
+
+        setNodes(prev => prev.map(node => updateItem(node)));
+        setSelectedNode(prev => updateItem(prev));
+        setContextNode(prev => updateItem(prev));
+
+        if (!skipFetch) {
+          // 선 끊기/연결 등 큰 변화가 있을 때는 확실히 await 하여 순서를 보장
+          await fetchNodes(activeChat.id);
+        }
       }
     } catch (err) {
       console.error('Update Node Error:', err);
@@ -466,8 +478,8 @@ function App() {
       });
       if (response.ok) {
         setIsDeleteNodeModalOpen(false);
-        setSelectedNode(null); 
-        await fetchNodes(activeChat.id); 
+        setSelectedNode(null);
+        await fetchNodes(activeChat.id);
       } else {
         const errorData = await response.json();
         alert(errorData.error || '노드 삭제에 실패했습니다.');
@@ -544,9 +556,9 @@ function App() {
 
       if (!activeChat) return;
 
-      const isSubMode = activeIcons.next; 
-      const isContentBlock = activeIcons.node; 
-      
+      const isSubMode = activeIcons.next;
+      const isContentBlock = activeIcons.node;
+
       const formData = new FormData();
       formData.append('chat_id', activeChat.id);
       formData.append('text_content', inputText);
@@ -555,7 +567,7 @@ function App() {
         formData.append('reference_node_id', "");
         formData.append('parent_id', "");
         formData.append('node_type', 'content');
-        formData.append('node_label', 'B1-1'); 
+        formData.append('node_label', 'B1-1');
       } else {
         let finalParentId = "";
         if (contextNode) {
@@ -813,7 +825,7 @@ function App() {
                       <button
                         key={node.id}
                         className={`node-item ${selectedNode?.id === node.id ? 'selected' : ''}`}
-                        style={{ 
+                        style={{
                           paddingLeft: `${16 + depth * 12}px`,
                           borderLeft: depth > 0 ? `1px solid rgba(255, 255, 255, 0.05)` : 'none'
                         }}
@@ -930,52 +942,52 @@ function App() {
                     {/* Column 1: 출제 범위 (캡슐 UI) */}
                     <div className="setup-col-v3">
                       <div className="col-title-v3">출제 범위</div>
-                        <label className="bulk-check-v3">
-                          <div className="checkbox-wrapper-v3">
-                            <input 
-                              type="checkbox" 
-                              id="bulk-select-quiz"
-                              checked={nodes.length > 0 && quizConfig.selectedNodeIds.length === nodes.length}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setQuizConfig(prev => ({ ...prev, selectedNodeIds: nodes.map(n => n.id) }));
-                                } else {
-                                  setQuizConfig(prev => ({ ...prev, selectedNodeIds: [] }));
-                                }
-                              }}
-                            />
-                            <div className="custom-check-v3"></div>
-                          </div>
-                          <span>전체 선택</span>
-                        </label>
-                        <div className="capsule-frame-v3">
-                          <div className="capsule-scroll-v3">
-                            {nodes.length > 0 ? (
-                              nodes.map(node => (
-                                <div 
-                                  key={node.id} 
-                                  className={`node-card-v3 ${quizConfig.selectedNodeIds.includes(node.id) ? 'active' : ''}`} 
-                                  onClick={() => toggleNodeSelection(node.id)}
-                                >
-                                  <div className="checkbox-wrapper-v3">
-                                    <input
-                                      type="checkbox"
-                                      checked={quizConfig.selectedNodeIds.includes(node.id)}
-                                      onChange={() => {}} // onClick in parent div handles this
-                                    />
-                                    <div className="custom-check-v3"></div>
-                                  </div>
-                                  <div className="node-info-v3">
-                                    <span className="n-label-v3">{getDisplayLabel(node.node_label)}</span>
-                                    <span className="n-title-v3">{node.node_title}</span>
-                                  </div>
-                                </div>
-                              ))
-                            ) : (
-                              <div className="empty-msg-v3">등록된 노드가 없습니다.</div>
-                            )}
-                          </div>
+                      <label className="bulk-check-v3">
+                        <div className="checkbox-wrapper-v3">
+                          <input
+                            type="checkbox"
+                            id="bulk-select-quiz"
+                            checked={nodes.length > 0 && quizConfig.selectedNodeIds.length === nodes.length}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setQuizConfig(prev => ({ ...prev, selectedNodeIds: nodes.map(n => n.id) }));
+                              } else {
+                                setQuizConfig(prev => ({ ...prev, selectedNodeIds: [] }));
+                              }
+                            }}
+                          />
+                          <div className="custom-check-v3"></div>
                         </div>
+                        <span>전체 선택</span>
+                      </label>
+                      <div className="capsule-frame-v3">
+                        <div className="capsule-scroll-v3">
+                          {nodes.length > 0 ? (
+                            nodes.map(node => (
+                              <div
+                                key={node.id}
+                                className={`node-card-v3 ${quizConfig.selectedNodeIds.includes(node.id) ? 'active' : ''}`}
+                                onClick={() => toggleNodeSelection(node.id)}
+                              >
+                                <div className="checkbox-wrapper-v3">
+                                  <input
+                                    type="checkbox"
+                                    checked={quizConfig.selectedNodeIds.includes(node.id)}
+                                    onChange={() => { }} // onClick in parent div handles this
+                                  />
+                                  <div className="custom-check-v3"></div>
+                                </div>
+                                <div className="node-info-v3">
+                                  <span className="n-label-v3">{getDisplayLabel(node.node_label)}</span>
+                                  <span className="n-title-v3">{node.node_title}</span>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="empty-msg-v3">등록된 노드가 없습니다.</div>
+                          )}
+                        </div>
+                      </div>
                     </div>
 
                     {/* Column 2: 문제 유형 및 개수 */}
@@ -1050,8 +1062,8 @@ function App() {
                   </div>
 
                   <div className="quiz-footer-v3">
-                    <button 
-                      className="start-btn-v3" 
+                    <button
+                      className="start-btn-v3"
                       disabled={totalQuizCount === 0 || quizConfig.selectedNodeIds.length === 0}
                       onClick={() => alert('학습 데이터를 분석하여 퀴즈를 생성합니다.')}
                     >
@@ -1145,8 +1157,8 @@ function App() {
                                 <span>Gemini가 답변을 생성하고 있습니다...</span>
                               </div>
                             ) : (
-                              <ReactMarkdown 
-                                remarkPlugins={[remarkMath]} 
+                              <ReactMarkdown
+                                remarkPlugins={[remarkMath]}
                                 rehypePlugins={[rehypeKatex]}
                               >
                                 {selectedNode.answer_text}
@@ -1278,8 +1290,8 @@ function App() {
                       </button>
                     </>
                   )}
-                  <button 
-                    className="icon-button send-btn-main" 
+                  <button
+                    className="icon-button send-btn-main"
                     onClick={handleSendMessage}
                     disabled={isGenerating || (!inputText.trim() && !selectedImage)}
                     style={{ opacity: (isGenerating || (!inputText.trim() && !selectedImage)) ? 0.5 : 1 }}
