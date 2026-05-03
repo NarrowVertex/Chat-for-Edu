@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Menu, Plus, Compass, Sparkles, Mic, Paperclip, MessageSquare, MessageCircle, X,
   ArrowLeft, Search, Share2, Star, Edit3, RotateCcw, ThumbsUp, ThumbsDown,
-  MoreVertical, ChevronRight, ChevronDown, Hash, Send, ExternalLink, CornerDownRight, SquarePlus, Trash2, Loader2
+  MoreVertical, ChevronRight, ChevronDown, Hash, Send, ExternalLink, CornerDownRight, SquarePlus, Trash2, Loader2, Bell, Check
 } from 'lucide-react';
 import './App.css';
 import ReactMarkdown from 'react-markdown';
@@ -82,6 +82,19 @@ function App() {
     selectedNodeIds: []
   });
 
+  const [quizList, setQuizList] = useState([]); // { id, title, status, data, config }
+  const [activeQuiz, setActiveQuiz] = useState(null); // 현재 풀고 있는 퀴즈 데이터
+  const [quizState, setQuizState] = useState('setup'); // 'setup', 'taking', 'result'
+  const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
+  const [userAnswers, setUserAnswers] = useState([]);
+  const [quizFeedback, setQuizFeedback] = useState([]);
+  const [showCheckFeedback, setShowCheckFeedback] = useState(null); // id of quiz that just finished
+  const [quizProgressMap, setQuizProgressMap] = useState({}); // { [quizId]: { currentQuizIndex, userAnswers, quizFeedback, quizState } }
+  const [editingQuizId, setEditingQuizId] = useState(null);
+  const [editingQuizTitle, setEditingQuizTitle] = useState('');
+  const [quizTasks, setQuizTasks] = useState([]); // [{ tempId, chatId, status, title, resultId }]
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+
   const totalQuizCount = Object.values(quizConfig.types).reduce((a, b) => a + b, 0);
 
   const toggleNodeSelection = (nodeId) => {
@@ -117,6 +130,30 @@ function App() {
     }
   }, [nodes]);
 
+  // 진행 상태 자동 저장
+  useEffect(() => {
+    if (activeQuiz && quizState !== 'setup') {
+      if (quizState === 'result') {
+        // 퀴즈 결과를 봤다면 해당 퀴즈의 진행도를 초기화하여 나중에 처음부터 다시 풀 수 있게 함
+        setQuizProgressMap(prev => {
+          const next = { ...prev };
+          delete next[activeQuiz.id];
+          return next;
+        });
+      } else {
+        setQuizProgressMap(prev => ({
+          ...prev,
+          [activeQuiz.id]: {
+            currentQuizIndex,
+            userAnswers,
+            quizFeedback,
+            quizState
+          }
+        }));
+      }
+    }
+  }, [activeQuiz, currentQuizIndex, userAnswers, quizFeedback, quizState]);
+
   const handleQuizTypeChange = (type, delta) => {
     setQuizConfig(prev => {
       const newValue = Math.max(0, prev.types[type] + delta);
@@ -136,6 +173,255 @@ function App() {
         }
       };
     });
+  };
+
+  const fetchQuizzes = async (chatId) => {
+    try {
+      const response = await fetch(`http://localhost:5000/api/chats/${chatId}/quizzes`);
+      if (response.ok) {
+        const data = await response.json();
+        setQuizList(data.map(q => ({
+          id: q.id,
+          title: `${activeChat?.title || '프로젝트'} 퀴즈`,
+          status: q.status === 'completed' ? 'ready' : q.status,
+          config: q.config,
+          data: []
+        })));
+      }
+    } catch (err) {
+      console.error('Fetch Quizzes Error:', err);
+    }
+  };
+
+  const handleGenerateQuiz = async () => {
+    // 임시 ID로 추가
+    const tempId = Date.now();
+    const newQuiz = {
+      id: tempId,
+      title: `${activeChat.title} 퀴즈`,
+      status: 'generating',
+      config: { ...quizConfig },
+      data: []
+    };
+
+    setQuizList(prev => [newQuiz, ...prev]); // 최신 항목이 위로 오도록
+
+    // 전역 작업 리스트에 추가
+    setQuizTasks(prev => [{
+      tempId,
+      chatId: activeChat.id,
+      status: 'generating',
+      title: newQuiz.title
+    }, ...prev]);
+
+    try {
+      const response = await fetch('http://localhost:5000/api/quiz/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: activeChat.id,
+          selectedNodeIds: quizConfig.selectedNodeIds,
+          config: quizConfig
+        })
+      });
+
+      if (response.ok) {
+        const { quizId, quizData } = await response.json();
+        
+        // 작업 리스트 업데이트
+        setQuizTasks(prev => prev.map(t => t.tempId === tempId ? { ...t, status: 'completed', resultId: quizId } : t));
+
+        // 1. 현재 보고 있는 프로젝트가 생성된 퀴즈의 프로젝트인 경우 UI 업데이트
+        setQuizList(prev => {
+          const exists = prev.some(q => q.id === tempId);
+          if (!exists) return prev;
+          return prev.map(q => q.id === tempId ? { 
+            ...q, 
+            id: quizId,
+            status: 'ready', 
+            data: quizData.map(d => ({
+              type: d.type,
+              question: d.question,
+              options: d.options,
+              answer: d.answer,
+              explanation: d.explanation
+            }))
+          } : q);
+        });
+
+        // 2. 만약 사용자가 다른 곳에 있더라도 피드백 애니메이션 예약 (나중에 해당 프로젝트로 돌아오면 보여줄 수 있음)
+        // 여기서는 알림 알림으로 대체
+        
+        setShowCheckFeedback(quizId);
+        setTimeout(() => setShowCheckFeedback(null), 2000);
+      } else {
+        setQuizTasks(prev => prev.map(t => t.tempId === tempId ? { ...t, status: 'failed' } : t));
+        setQuizList(prev => prev.filter(q => q.id !== tempId));
+        alert("퀴즈 생성에 실패했습니다.");
+      }
+    } catch (err) {
+      console.error("Generate Quiz Error:", err);
+      setQuizTasks(prev => prev.map(t => t.tempId === tempId ? { ...t, status: 'failed' } : t));
+      setQuizList(prev => prev.filter(q => q.id !== tempId));
+      alert("서버 연결에 실패했습니다.");
+    }
+  };
+
+  const startQuizSession = async (quiz) => {
+    let finalQuiz = quiz;
+    if (!quiz.data || quiz.data.length === 0) {
+      try {
+        const response = await fetch(`http://localhost:5000/api/quizzes/${quiz.id}/questions`);
+        if (response.ok) {
+          const questions = await response.json();
+          const mappedQuestions = questions.map(q => ({
+            id: q.id,
+            type: q.question_type,
+            question: q.question_text,
+            options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
+            answer: q.correct_answer,
+            explanation: q.explanation
+          }));
+
+          finalQuiz = { ...quiz, data: mappedQuestions };
+          setQuizList(prev => prev.map(p => p.id === quiz.id ? finalQuiz : p));
+        } else {
+          alert("문제를 불러오지 못했습니다.");
+          return;
+        }
+      } catch (err) {
+        console.error("Fetch Questions Error:", err);
+        alert("문제를 불러오지 못했습니다.");
+        return;
+      }
+    }
+
+    setActiveQuiz(finalQuiz);
+
+    // 저장된 진행 상황이 있으면 복원
+    if (quizProgressMap[finalQuiz.id]) {
+      const p = quizProgressMap[finalQuiz.id];
+      setCurrentQuizIndex(p.currentQuizIndex);
+      setUserAnswers(p.userAnswers);
+      setQuizFeedback(p.quizFeedback);
+      setQuizState(p.quizState);
+    } else {
+      setQuizState('taking');
+      setCurrentQuizIndex(0);
+      setUserAnswers(new Array(finalQuiz.data.length).fill(''));
+      setQuizFeedback(new Array(finalQuiz.data.length).fill(null));
+    }
+  };
+
+  const handleDeleteQuiz = async (e, quizId) => {
+    e.stopPropagation();
+    if (!window.confirm("정말 이 퀴즈를 삭제하시겠습니까?")) return;
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/quizzes/${quizId}`, {
+        method: 'DELETE'
+      });
+      if (response.ok) {
+        setQuizList(prev => prev.filter(q => q.id !== quizId));
+        setQuizProgressMap(prev => {
+          const next = { ...prev };
+          delete next[quizId];
+          return next;
+        });
+      } else {
+        alert("퀴즈 삭제에 실패했습니다.");
+      }
+    } catch (err) {
+      console.error("Delete Quiz Error:", err);
+      alert("서버 통신 오류가 발생했습니다.");
+    }
+  };
+
+  const handleEditQuizTitleSubmit = async (e, quizId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!editingQuizTitle.trim()) {
+      setEditingQuizId(null);
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/quizzes/${quizId}/title`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: editingQuizTitle })
+      });
+      if (response.ok) {
+        setQuizList(prev => prev.map(q => q.id === quizId ? { ...q, title: editingQuizTitle } : q));
+        setEditingQuizId(null);
+      } else {
+        alert("퀴즈 제목 수정에 실패했습니다.");
+      }
+    } catch (err) {
+      console.error("Edit Quiz Title Error:", err);
+      alert("서버 통신 오류가 발생했습니다.");
+    }
+  };
+
+  const handleNotifClick = (task) => {
+    if (task.status === 'generating') return;
+
+    // 1. 해당 프로젝트로 이동 (ID 타입 불일치 방지를 위해 String 변환 비교)
+    const targetChat = historyItems.find(c => String(c.id) === String(task.chatId));
+    if (targetChat) {
+      enterProject(targetChat);
+      setViewMode('quiz'); // 퀴즈 탭으로 바로 이동
+    }
+
+    // 2. 알림 삭제
+    setQuizTasks(prev => prev.filter(t => t.tempId !== task.tempId));
+    
+    // 3. 알림창 닫기
+    setIsNotificationOpen(false);
+  };
+
+  const handleAnswerSelect = (val) => {
+    setUserAnswers(prev => {
+      const next = [...prev];
+      next[currentQuizIndex] = val;
+      return next;
+    });
+  };
+
+  const handleQuizSubmit = async () => {
+    setIsGenerating(true); // 채점 중 로딩 표시용으로 재사용
+    const newFeedback = [...quizFeedback];
+    
+    try {
+      for (let i = 0; i < activeQuiz.data.length; i++) {
+        const q = activeQuiz.data[i];
+        if (q.type === 'descriptive') {
+          const response = await fetch('http://localhost:5000/api/quiz/grade', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              question_text: q.question,
+              correct_answer: q.answer,
+              explanation: q.explanation,
+              user_answer: userAnswers[i]
+            })
+          });
+          if (response.ok) {
+            const data = await response.json();
+            newFeedback[i] = data; // { score, feedback }
+          }
+        }
+      }
+      setQuizFeedback(newFeedback);
+      setQuizState('result');
+    } catch (err) {
+      console.error('Quiz Submit Error:', err);
+      alert('채점 중 오류가 발생했습니다.');
+      setQuizState('result'); // 오류나더라도 일단 결과창으로
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   // 입력창 자동 높이 조절
@@ -254,6 +540,7 @@ function App() {
   useEffect(() => {
     if (activeChat) {
       fetchNodes(activeChat.id);
+      fetchQuizzes(activeChat.id);
     }
   }, [activeChat]);
 
@@ -265,6 +552,7 @@ function App() {
   const enterProject = (chat) => {
     setNodes([]); // 이전 프로젝트 노드 비우기
     setSelectedNode(null); // 선택된 노드 초기화
+    setQuizList([]); // 이전 프로젝트 퀴즈 목록 비우기
     setActiveChat(chat);
     setView('project');
   };
@@ -617,6 +905,17 @@ function App() {
 
   const processImageFile = (file) => {
     if (!file) return;
+    
+    // 이미지 파일 여부 확인
+    if (!file.type.startsWith('image/')) {
+      alert("이미지 파일(jpg, png, webp 등)만 업로드 가능합니다.");
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert("이미지 크기는 10MB를 초과할 수 없습니다.");
+      return;
+    }
     setSelectedImage(file);
     const reader = new FileReader();
     reader.onloadend = () => setImagePreviewUrl(reader.result);
@@ -883,6 +1182,47 @@ function App() {
         <header className="top-bar">
           <div className="logo-text">Chat for Edu</div>
           <div className="user-controls">
+            <div className="notification-wrapper" style={{ position: 'relative' }}>
+              <button 
+                className={`icon-button bell-btn ${quizTasks.some(t => t.status === 'generating') ? 'pulse' : ''}`}
+                onClick={() => setIsNotificationOpen(!isNotificationOpen)}
+                style={{ marginRight: '16px' }}
+              >
+                <Bell size={22} color={isNotificationOpen ? '#4285f4' : '#5f6368'} />
+                {quizTasks.length > 0 && <span className="notification-badge">{quizTasks.length}</span>}
+              </button>
+
+              {isNotificationOpen && (
+                <div className="notification-dropdown glass-panel-v3">
+                  <div className="notif-header">알림</div>
+                  <div className="notif-list">
+                    {quizTasks.length === 0 ? (
+                      <div className="notif-empty">새로운 알림이 없습니다.</div>
+                    ) : (
+                      quizTasks.map((task, i) => (
+                        <div 
+                          key={i} 
+                          className={`notif-item ${task.status !== 'generating' ? 'clickable' : ''}`}
+                          onClick={() => handleNotifClick(task)}
+                        >
+                          <div className="notif-icon">
+                            {task.status === 'generating' ? <Loader2 size={16} className="spinning-icon" /> : 
+                             task.status === 'completed' ? <Check size={16} color="#00c896" /> : <X size={16} color="#ff4d4d" />}
+                          </div>
+                          <div className="notif-content">
+                            <div className="notif-title">{task.title}</div>
+                            <div className="notif-desc">
+                              {task.status === 'generating' ? '퀴즈가 생성되는 중입니다...' : 
+                               task.status === 'completed' ? '퀴즈 생성이 완료되었습니다. (클릭하여 이동)' : '퀴즈 생성에 실패했습니다.'}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
 
             <div className="avatar" onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)} style={{ cursor: 'pointer', position: 'relative' }}>
               {currentUser?.user_id?.charAt(0).toUpperCase()}
@@ -931,146 +1271,423 @@ function App() {
               </div>
             ) : viewMode === 'quiz' ? (
               <div className="quiz-container fade-up-element">
-                <div className="quiz-setup-card-v3 glass-panel-v3">
-                  <div className="quiz-setup-header-v3">
-                    <div className="quiz-badge-v3">QUIZ MODE</div>
-                    <h2>학습 퀴즈 설정</h2>
-                    <p>학습한 내용을 점검하기 위한 맞춤형 문제를 구성하세요.</p>
-                  </div>
+                {quizState === 'setup' ? (
+                  <div className="quiz-layout-v3">
+                    {/* Left: Setup Card (Original Structure Restored) */}
+                    <div className="quiz-setup-card-v3 glass-panel-v3">
+                      <div className="quiz-setup-header-v3">
+                        <div className="quiz-badge-v3">QUIZ MODE</div>
+                        <h2>학습 퀴즈 설정</h2>
+                        <p>학습한 내용을 점검하기 위한 맞춤형 문제를 구성하세요.</p>
+                      </div>
 
-                  <div className="quiz-setup-grid-v3">
-                    {/* Column 1: 출제 범위 (캡슐 UI) */}
-                    <div className="setup-col-v3">
-                      <div className="col-title-v3">출제 범위</div>
-                      <label className="bulk-check-v3">
-                        <div className="checkbox-wrapper-v3">
-                          <input
-                            type="checkbox"
-                            id="bulk-select-quiz"
-                            checked={nodes.length > 0 && quizConfig.selectedNodeIds.length === nodes.length}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setQuizConfig(prev => ({ ...prev, selectedNodeIds: nodes.map(n => n.id) }));
-                              } else {
-                                setQuizConfig(prev => ({ ...prev, selectedNodeIds: [] }));
-                              }
-                            }}
-                          />
-                          <div className="custom-check-v3"></div>
+                      <div className="quiz-setup-grid-v3">
+                        {/* Column 1: 출제 범위 (캡슐 UI) */}
+                        <div className="setup-col-v3">
+                          <div className="col-title-v3">출제 범위</div>
+                          <label className="bulk-check-v3">
+                            <div className="checkbox-wrapper-v3">
+                              <input
+                                type="checkbox"
+                                id="bulk-select-quiz"
+                                checked={nodes.length > 0 && quizConfig.selectedNodeIds.length === nodes.length}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setQuizConfig(prev => ({ ...prev, selectedNodeIds: nodes.map(n => n.id) }));
+                                  } else {
+                                    setQuizConfig(prev => ({ ...prev, selectedNodeIds: [] }));
+                                  }
+                                }}
+                              />
+                              <div className="custom-check-v3"></div>
+                            </div>
+                            <span>전체 선택</span>
+                          </label>
+                          <div className="capsule-frame-v3">
+                            <div className="capsule-scroll-v3">
+                              {nodes.length > 0 ? (
+                                nodes.map(node => (
+                                  <div
+                                    key={node.id}
+                                    className={`node-card-v3 ${quizConfig.selectedNodeIds.includes(node.id) ? 'active' : ''}`}
+                                    onClick={() => toggleNodeSelection(node.id)}
+                                  >
+                                    <div className="checkbox-wrapper-v3">
+                                      <input
+                                        type="checkbox"
+                                        checked={quizConfig.selectedNodeIds.includes(node.id)}
+                                        readOnly
+                                      />
+                                      <div className="custom-check-v3"></div>
+                                    </div>
+                                    <div className="node-info-v3">
+                                      <span className="n-label-v3">{getDisplayLabel(node.node_label)}</span>
+                                      <span className="n-title-v3">{node.node_title}</span>
+                                    </div>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="empty-msg-v3">등록된 노드가 없습니다.</div>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <span>전체 선택</span>
-                      </label>
-                      <div className="capsule-frame-v3">
-                        <div className="capsule-scroll-v3">
-                          {nodes.length > 0 ? (
-                            nodes.map(node => (
-                              <div
-                                key={node.id}
-                                className={`node-card-v3 ${quizConfig.selectedNodeIds.includes(node.id) ? 'active' : ''}`}
-                                onClick={() => toggleNodeSelection(node.id)}
-                              >
-                                <div className="checkbox-wrapper-v3">
-                                  <input
-                                    type="checkbox"
-                                    checked={quizConfig.selectedNodeIds.includes(node.id)}
-                                    onChange={() => { }} // onClick in parent div handles this
-                                  />
-                                  <div className="custom-check-v3"></div>
+
+                        {/* Column 2: 문제 유형 및 개수 */}
+                        <div className="setup-col-v3">
+                          <div className="col-title-v3">문제 유형 및 개수</div>
+                          <div className="total-sum-display-v3">
+                            전체 문제: <span className={totalQuizCount > 0 ? 'highlight' : ''}>{totalQuizCount}</span> / 20 개
+                          </div>
+                          <div className="type-controls-v3">
+                            <div className="type-row-v3">
+                              <span>O,X 문제:</span>
+                              <div className="counter-v3">
+                                <button onClick={() => handleQuizTypeChange('ox', -1)}>-</button>
+                                <span className="count">{quizConfig.types.ox}</span>
+                                <button onClick={() => handleQuizTypeChange('ox', 1)}>+</button>
+                              </div>
+                              <span className="unit">개</span>
+                            </div>
+                            <div className="type-row-v3">
+                              <span>객관식:</span>
+                              <div className="counter-v3">
+                                <button onClick={() => handleQuizTypeChange('multiple', -1)}>-</button>
+                                <span className="count">{quizConfig.types.multiple}</span>
+                                <button onClick={() => handleQuizTypeChange('multiple', 1)}>+</button>
+                              </div>
+                              <span className="unit">개</span>
+                            </div>
+
+                            {/* 계산 문제 포함 (주관식/서술형 전용) */}
+                            <label className="calc-toggle-v3">
+                              <div className="checkbox-wrapper-v3">
+                                <input
+                                  type="checkbox"
+                                  checked={quizConfig.includeCalculation}
+                                  onChange={(e) => setQuizConfig({ ...quizConfig, includeCalculation: e.target.checked })}
+                                />
+                                <div className="custom-check-v3"></div>
+                              </div>
+                              <span>계산 문제 포함</span>
+                            </label>
+
+                            <div className="type-row-v3">
+                              <span>주관식:</span>
+                              <div className="counter-v3">
+                                <button onClick={() => handleQuizTypeChange('short', -1)}>-</button>
+                                <span className="count">{quizConfig.types.short}</span>
+                                <button onClick={() => handleQuizTypeChange('short', 1)}>+</button>
+                              </div>
+                              <span className="unit">개</span>
+                            </div>
+                            <div className="type-row-v3">
+                              <span>서술형:</span>
+                              <div className="counter-v3">
+                                <button onClick={() => handleQuizTypeChange('descriptive', -1)}>-</button>
+                                <span className="count">{quizConfig.types.descriptive}</span>
+                                <button onClick={() => handleQuizTypeChange('descriptive', 1)}>+</button>
+                              </div>
+                              <span className="unit">개</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Column 3: 난이도 (Original Color Buttons) */}
+                        <div className="setup-col-v3">
+                          <div className="col-title-v3">난이도</div>
+                          <div className="difficulty-vertical-v3">
+                            <button className={`diff-btn-v3 low ${quizConfig.difficulty === '하' ? 'active' : ''}`} onClick={() => setQuizConfig({ ...quizConfig, difficulty: '하' })}>하</button>
+                            <button className={`diff-btn-v3 mid ${quizConfig.difficulty === '중' ? 'active' : ''}`} onClick={() => setQuizConfig({ ...quizConfig, difficulty: '중' })}>중</button>
+                            <button className={`diff-btn-v3 high ${quizConfig.difficulty === '상' ? 'active' : ''}`} onClick={() => setQuizConfig({ ...quizConfig, difficulty: '상' })}>상</button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="quiz-footer-v3">
+                        <button
+                          className="start-btn-v3"
+                          disabled={totalQuizCount === 0 || quizConfig.selectedNodeIds.length === 0}
+                          onClick={handleGenerateQuiz}
+                        >
+                          생성하기
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Right: History Panel */}
+                    <div className="quiz-history-panel-v3 glass-panel-v3">
+                      <div className="history-header-v3">
+                        <h3>생성된 퀴즈</h3>
+                        <span className="history-count-v3">{quizList.length}</span>
+                      </div>
+                      <div className="history-list-v3">
+                        {quizList.length === 0 ? (
+                          <div className="history-empty-v3">생성된 퀴즈가 없습니다.</div>
+                        ) : (
+                          quizList.map(q => (
+                            <div
+                              key={q.id}
+                              className={`quiz-history-block-v3 ${q.status} ${showCheckFeedback === q.id ? 'show-check' : ''}`}
+                              onClick={() => q.status === 'ready' && startQuizSession(q)}
+                            >
+                              <div className="q-block-info-v3" style={{ flex: 1, paddingRight: '12px' }}>
+                                <div className="q-block-title-v3" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  {editingQuizId === q.id ? (
+                                    <form onSubmit={(e) => handleEditQuizTitleSubmit(e, q.id)} onClick={e => e.stopPropagation()} style={{ flex: 1, display: 'flex' }}>
+                                      <input
+                                        autoFocus
+                                        value={editingQuizTitle}
+                                        onChange={e => setEditingQuizTitle(e.target.value)}
+                                        onBlur={(e) => handleEditQuizTitleSubmit(e, q.id)}
+                                        style={{ width: '100%', background: 'rgba(0,0,0,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', padding: '4px 8px', borderRadius: '4px', fontSize: '14px' }}
+                                      />
+                                    </form>
+                                  ) : (
+                                    <>
+                                      <span>{q.title}</span>
+                                      {q.status !== 'generating' && (
+                                        <Edit3 
+                                          size={14} 
+                                          style={{ cursor: 'pointer', opacity: 0.5 }} 
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setEditingQuizId(q.id);
+                                            setEditingQuizTitle(q.title);
+                                          }} 
+                                        />
+                                      )}
+                                    </>
+                                  )}
                                 </div>
-                                <div className="node-info-v3">
-                                  <span className="n-label-v3">{getDisplayLabel(node.node_label)}</span>
-                                  <span className="n-title-v3">{node.node_title}</span>
+                                <div className="q-block-meta-v3" style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%', marginTop: '4px' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span>{q.config.difficulty} · {Object.values(q.config.types).reduce((a, b) => a + b, 0)}문제</span>
+                                    {q.status === 'ready' && quizProgressMap[q.id] && quizProgressMap[q.id].userAnswers && (
+                                      <span style={{ fontSize: '11px', color: '#888', fontWeight: '500' }}>
+                                        {quizProgressMap[q.id].userAnswers.filter(a => a !== '').length} / {Object.values(q.config.types).reduce((a, b) => a + b, 0)}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {q.status === 'ready' && quizProgressMap[q.id] && quizProgressMap[q.id].userAnswers && (
+                                    <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
+                                      <div style={{ 
+                                        height: '100%', 
+                                        background: quizProgressMap[q.id].quizState === 'result' ? '#00c896' : '#4285f4', 
+                                        width: `${(quizProgressMap[q.id].userAnswers.filter(a => a !== '').length / Object.values(q.config.types).reduce((a, b) => a + b, 0)) * 100}%`,
+                                        transition: 'width 0.3s ease'
+                                      }}></div>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
-                            ))
-                          ) : (
-                            <div className="empty-msg-v3">등록된 노드가 없습니다.</div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Column 2: 문제 유형 및 개수 */}
-                    <div className="setup-col-v3">
-                      <div className="col-title-v3">문제 유형 및 개수</div>
-                      <div className="total-sum-display-v3">
-                        전체 문제: <span className={totalQuizCount > 0 ? 'highlight' : ''}>{totalQuizCount}</span> / 20 개
-                      </div>
-                      <div className="type-controls-v3">
-                        <div className="type-row-v3">
-                          <span>O,X 문제:</span>
-                          <div className="counter-v3">
-                            <button onClick={() => handleQuizTypeChange('ox', -1)}>-</button>
-                            <span className="count">{quizConfig.types.ox}</span>
-                            <button onClick={() => handleQuizTypeChange('ox', 1)}>+</button>
-                          </div>
-                          <span className="unit">개</span>
-                        </div>
-                        <div className="type-row-v3">
-                          <span>객관식:</span>
-                          <div className="counter-v3">
-                            <button onClick={() => handleQuizTypeChange('multiple', -1)}>-</button>
-                            <span className="count">{quizConfig.types.multiple}</span>
-                            <button onClick={() => handleQuizTypeChange('multiple', 1)}>+</button>
-                          </div>
-                          <span className="unit">개</span>
-                        </div>
-
-                        {/* 계산 문제 포함 (주관식/서술형 전용) */}
-                        <label className="calc-toggle-v3">
-                          <div className="checkbox-wrapper-v3">
-                            <input
-                              type="checkbox"
-                              checked={quizConfig.includeCalculation}
-                              onChange={(e) => setQuizConfig({ ...quizConfig, includeCalculation: e.target.checked })}
-                            />
-                            <div className="custom-check-v3"></div>
-                          </div>
-                          <span>계산 문제 포함</span>
-                        </label>
-
-                        <div className="type-row-v3">
-                          <span>주관식:</span>
-                          <div className="counter-v3">
-                            <button onClick={() => handleQuizTypeChange('short', -1)}>-</button>
-                            <span className="count">{quizConfig.types.short}</span>
-                            <button onClick={() => handleQuizTypeChange('short', 1)}>+</button>
-                          </div>
-                          <span className="unit">개</span>
-                        </div>
-                        <div className="type-row-v3">
-                          <span>서술형:</span>
-                          <div className="counter-v3">
-                            <button onClick={() => handleQuizTypeChange('descriptive', -1)}>-</button>
-                            <span className="count">{quizConfig.types.descriptive}</span>
-                            <button onClick={() => handleQuizTypeChange('descriptive', 1)}>+</button>
-                          </div>
-                          <span className="unit">개</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Column 3: 난이도 */}
-                    <div className="setup-col-v3">
-                      <div className="col-title-v3">난이도</div>
-                      <div className="difficulty-vertical-v3">
-                        <button className={`diff-btn-v3 low ${quizConfig.difficulty === '하' ? 'active' : ''}`} onClick={() => setQuizConfig({ ...quizConfig, difficulty: '하' })}>하</button>
-                        <button className={`diff-btn-v3 mid ${quizConfig.difficulty === '중' ? 'active' : ''}`} onClick={() => setQuizConfig({ ...quizConfig, difficulty: '중' })}>중</button>
-                        <button className={`diff-btn-v3 high ${quizConfig.difficulty === '상' ? 'active' : ''}`} onClick={() => setQuizConfig({ ...quizConfig, difficulty: '상' })}>상</button>
+                              <div className="q-block-actions-v3" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div
+                                  className="q-delete-btn-v3"
+                                  onClick={(e) => handleDeleteQuiz(e, q.id)}
+                                  title="퀴즈 삭제"
+                                >
+                                  <Trash2 size={16} />
+                                </div>
+                                <div className="q-block-status-v3">
+                                  {q.status === 'generating' ? (
+                                    <Loader2 className="spinning-icon" size={18} />
+                                  ) : (
+                                    <ChevronRight size={18} />
+                                  )}
+                                </div>
+                              </div>
+                              {showCheckFeedback === q.id && (
+                                <div className="check-overlay-v3">
+                                  <Sparkles className="check-sparkle" size={32} />
+                                  <div className="check-icon-v3">✓</div>
+                                </div>
+                              )}
+                            </div>
+                          ))
+                        )}
                       </div>
                     </div>
                   </div>
+                ) : quizState === 'taking' ? (
+                  /* Quiz Taking View */
+                  <div className="quiz-taking-container-v3">
+                    <div className="quiz-taking-header-v3">
+                      <button className="back-btn-v3" onClick={() => setQuizState('setup')}>
+                        <ArrowLeft size={20} />
+                        <span>나가기</span>
+                      </button>
+                      <div className="quiz-progress-v3">
+                        <div className="progress-text-v3">문제 {currentQuizIndex + 1} / {activeQuiz.data.length}</div>
+                        <div className="progress-bar-v3">
+                          <div className="progress-fill-v3" style={{ width: `${((currentQuizIndex + 1) / activeQuiz.data.length) * 100}%` }}></div>
+                        </div>
+                      </div>
+                    </div>
 
-                  <div className="quiz-footer-v3">
-                    <button
-                      className="start-btn-v3"
-                      disabled={totalQuizCount === 0 || quizConfig.selectedNodeIds.length === 0}
-                      onClick={() => alert('학습 데이터를 분석하여 퀴즈를 생성합니다.')}
-                    >
-                      생성하기
-                    </button>
+                    <div className="question-card-v3 glass-panel-v3">
+                      <div className="q-type-badge-v3">{activeQuiz.data[currentQuizIndex].type.toUpperCase()}</div>
+                      <div className="q-text-v3">
+                        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                          {activeQuiz.data[currentQuizIndex].question}
+                        </ReactMarkdown>
+                      </div>
+
+                      <div className="q-input-area-v3">
+                        {activeQuiz.data[currentQuizIndex].type === 'ox' ? (
+                          <div className="ox-options-v3">
+                            <button
+                              className={`ox-btn-v3 ${userAnswers[currentQuizIndex] === 'O' ? 'selected' : ''}`}
+                              onClick={() => handleAnswerSelect('O')}
+                            >O</button>
+                            <button
+                              className={`ox-btn-v3 ${userAnswers[currentQuizIndex] === 'X' ? 'selected' : ''}`}
+                              onClick={() => handleAnswerSelect('X')}
+                            >X</button>
+                          </div>
+                        ) : activeQuiz.data[currentQuizIndex].type === 'multiple' ? (
+                          <div className="multiple-options-v3">
+                            {activeQuiz.data[currentQuizIndex].options.map((opt, i) => (
+                              <button
+                                key={i}
+                                className={`opt-btn-v3 ${userAnswers[currentQuizIndex] === opt ? 'selected' : ''}`}
+                                onClick={() => handleAnswerSelect(opt)}
+                              >
+                                <span className="opt-num-v3">{i + 1}</span>
+                                <span className="opt-text-v3">
+                                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                    {opt}
+                                  </ReactMarkdown>
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : activeQuiz.data[currentQuizIndex].type === 'short' ? (
+                          <textarea
+                            className="short-answer-input-v3"
+                            placeholder="단답형 답안을 입력하세요..."
+                            value={userAnswers[currentQuizIndex] || ''}
+                            onChange={(e) => handleAnswerSelect(e.target.value)}
+                          />
+                        ) : (
+                          <textarea
+                            className="descriptive-input-v3"
+                            placeholder="서술형 답안을 입력하세요..."
+                            value={userAnswers[currentQuizIndex] || ''}
+                            onChange={(e) => handleAnswerSelect(e.target.value)}
+                          />
+                        )}
+                      </div>
+
+                      <div className="q-nav-v3">
+                        <button
+                          className="nav-btn-v3 prev"
+                          disabled={currentQuizIndex === 0}
+                          onClick={() => setCurrentQuizIndex(prev => prev - 1)}
+                        >이전</button>
+                        {currentQuizIndex === activeQuiz.data.length - 1 ? (
+                          <button
+                            className="nav-btn-v3 submit"
+                            onClick={handleQuizSubmit}
+                            disabled={isGenerating}
+                          >{isGenerating ? '채점 중...' : '결과 보기'}</button>
+                        ) : (
+                          <button
+                            className="nav-btn-v3 next"
+                            onClick={() => setCurrentQuizIndex(prev => prev + 1)}
+                            disabled={!userAnswers[currentQuizIndex]}
+                          >다음</button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  /* Quiz Result View */
+                  <div className="quiz-result-container-v3">
+                    <div className="result-header-v3 glass-panel-v3">
+                      <div className="result-score-v3">
+                        <div className="score-circle-v3">
+                          <span className="score-num-v3">
+                            {userAnswers.filter((ans, i) => {
+                              const q = activeQuiz.data[i];
+                              if (q.type === 'descriptive') return quizFeedback[i] && quizFeedback[i].score >= 70;
+                              return String(ans).trim().toLowerCase() === String(q.answer).trim().toLowerCase();
+                            }).length}
+                          </span>
+                          <span className="score-total-v3">/ {activeQuiz.data.length}</span>
+                        </div>
+                        <h3>퀴즈 완료!</h3>
+                        <div style={{ display: 'flex', gap: '12px', marginTop: '16px', justifyContent: 'center' }}>
+                          <button className="reset-btn-v3" style={{ marginTop: 0 }} onClick={() => setQuizState('setup')}>목록으로 돌아가기</button>
+                          <button className="reset-btn-v3" style={{ marginTop: 0, background: 'rgba(66, 133, 244, 0.2)', border: '1px solid #4285f4' }} onClick={() => {
+                            setUserAnswers([]);
+                            setQuizFeedback([]);
+                            setCurrentQuizIndex(0);
+                            setQuizState('taking');
+                          }}>다시 시작</button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="result-list-v3">
+                      {activeQuiz.data.map((q, i) => {
+                        let isCorrect = false;
+                        if (q.type === 'descriptive') {
+                           isCorrect = quizFeedback[i] && quizFeedback[i].score >= 70;
+                        } else {
+                           isCorrect = String(userAnswers[i]).trim().toLowerCase() === String(q.answer).trim().toLowerCase();
+                        }
+                        return (
+                          <div key={i} className={`result-card-v3 glass-panel-v3 ${isCorrect ? 'correct' : 'incorrect'}`}>
+                            <div className="res-q-header-v3">
+                              <span className={`res-badge-v3 ${isCorrect ? 'correct' : 'incorrect'}`}>
+                                {isCorrect ? '정답' : '오답'} {q.type === 'descriptive' && quizFeedback[i] ? `(${quizFeedback[i].score}점)` : ''}
+                              </span>
+                              <span className="res-num-v3">문제 {i + 1}</span>
+                            </div>
+                            <div className="res-q-text-v3">
+                              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                {q.question}
+                              </ReactMarkdown>
+                            </div>
+                            <div className="res-compare-v3">
+                              <div className="res-ans-box-v3">
+                                <label>나의 답변:</label>
+                                <div className="ans-val-v3">{userAnswers[i] || '(입력 없음)'}</div>
+                              </div>
+                              {!isCorrect && q.type !== 'descriptive' && (
+                                <div className="res-ans-box-v3 correct-box">
+                                  <label>정답:</label>
+                                  <div className="ans-val-v3">
+                                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                      {q.answer}
+                                    </ReactMarkdown>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            
+                            {q.type === 'descriptive' && quizFeedback[i] && (
+                                <div className="res-explanation-v3" style={{ marginBottom: '16px' }}>
+                                  <label style={{ color: '#4285f4' }}>AI 피드백:</label>
+                                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                    {quizFeedback[i].feedback}
+                                  </ReactMarkdown>
+                                </div>
+                            )}
+
+                            <div className="res-explanation-v3">
+                              <label>해설 / 모범 답안:</label>
+                              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                {q.explanation || q.answer}
+                              </ReactMarkdown>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="node-detail-container fade-up-element">
@@ -1188,7 +1805,8 @@ function App() {
                   </div>
                 )}
               </div>
-            ))}
+            )
+          )}
 
         </section>
 
@@ -1222,7 +1840,7 @@ function App() {
                 <div className="input-actions-left">
                   <label style={{ cursor: isGenerating ? 'not-allowed' : 'pointer' }}>
                     <Paperclip size={20} style={{ opacity: isGenerating ? 0.5 : 1 }} />
-                    <input type="file" style={{ display: 'none' }} onChange={(e) => processImageFile(e.target.files[0])} disabled={isGenerating} />
+                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => processImageFile(e.target.files[0])} disabled={isGenerating} />
                   </label>
                 </div>
                 <div className="input-actions-right">
