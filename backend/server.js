@@ -8,9 +8,11 @@ const fs = require('fs');
 const multer = require('multer');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// Gemini API 초기화 (안정적인 2.5 Flash 모델 사용)
+// Gemini API 초기화 (기존 사용하던 2.5 Flash 모델로 복구)
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+const model = genAI.getGenerativeModel({
+  model: "gemini-2.5-flash",
+});
 
 // 이미지 데이터를 Gemini API용 포맷으로 변환하는 함수
 function fileToGenerativePart(path, mimeType) {
@@ -97,7 +99,14 @@ async function initDB() {
         FOREIGN KEY (quiz_id) REFERENCES Quizzes(id) ON DELETE CASCADE
       )
     `);
-    console.log('퀴즈 관련 테이블 초기화 완료');
+
+    // [추가] 서버 시작 시, 완료되지 못하고 'generating' 상태로 남은 유령 데이터 삭제
+    const [cleanupResult] = await db.execute(`DELETE FROM Quizzes WHERE status = 'generating'`);
+    if (cleanupResult.affectedRows > 0) {
+      console.log(`[DB Cleanup] ${cleanupResult.affectedRows}개의 유령 퀴즈 데이터를 정리했습니다.`);
+    }
+
+    console.log('퀴즈 관련 테이블 및 데이터 정리 완료');
   } catch (err) {
     console.error('DB 초기화 에러:', err);
   }
@@ -683,19 +692,23 @@ app.delete('/api/chats/:chatId', async (req, res) => {
 
 // --- 퀴즈 관련 API ---
 
+// --- 퀴즈 관련 API ---
+
+// 퀴즈 생성 API
 app.post('/api/quiz/generate', async (req, res) => {
+  let quizId; // 에러 핸들링을 위해 스코프 상단에 선언
   try {
-    const { selectedNodeIds, config } = req.body;
+    const { chatId, selectedNodeIds, config } = req.body;
     const { types, difficulty, includeCalculation } = config;
 
     if (!selectedNodeIds || selectedNodeIds.length === 0) {
       return res.status(400).json({ error: "출제 범위를 선택해주세요." });
     }
 
-    // 1. 선택된 노드들의 텍스트 데이터 수집 및 chat_id 확인
+    // 1. 선택된 노드들의 텍스트 데이터 수집
     const placeholders = selectedNodeIds.map(() => '?').join(',');
     const [nodes] = await db.execute(
-      `SELECT chat_id, question_text, answer_text, node_title FROM Messages WHERE id IN (${placeholders})`,
+      `SELECT question_text, answer_text, node_title FROM Messages WHERE id IN (${placeholders})`,
       selectedNodeIds
     );
 
@@ -703,34 +716,33 @@ app.post('/api/quiz/generate', async (req, res) => {
       return res.status(404).json({ error: "학습 데이터를 찾을 수 없습니다." });
     }
 
-    const chat_id = nodes[0].chat_id;
-
-    // 2. Quiz 레코드 생성 (생성 중 상태)
+    // 2. Quiz 마스터 레코드 생성 (생성 중 상태)
     const [quizResult] = await db.execute(
       `INSERT INTO Quizzes (chat_id, status, config) VALUES (?, 'generating', ?)`,
-      [chat_id, JSON.stringify(config)]
+      [chatId, JSON.stringify(config)]
     );
-    const quizId = quizResult.insertId;
+    quizId = quizResult.insertId;
 
-    const contextText = nodes.map(n => 
-      `제목: ${n.node_title}\n질문: ${n.question_text}\n내용: ${n.answer_text}`
-    ).join('\n\n---\n\n');
+    try {
+      const contextText = nodes.map(n => 
+        `제목: ${n.node_title}\n질문: ${n.question_text}\n내용: ${n.answer_text}`
+      ).join('\n\n---\n\n');
 
-    // 3. 난이도 및 계산 로직에 따른 프롬프트 구성
-    let difficultyInstruction = "";
-    if (difficulty === '하') {
-      difficultyInstruction = "제공된 학습 내용에 명시된 사실을 그대로 확인하는 수준의 문제를 출제하세요.";
-    } else if (difficulty === '중') {
-      difficultyInstruction = "제공된 학습 내용을 실제 상황이나 새로운 사례에 적용하여 풀이해야 하는 응용 문제를 출제하세요.";
-    } else if (difficulty === '상') {
-      difficultyInstruction = "제공된 학습 내용을 기반으로 하되, 그 이상의 추론이나 관련 심화 지식을 연계하여 비판적 사고를 요구하는 확장형 문제를 출제하세요.";
-    }
+      // 난이도 및 계산 로직 구성
+      let difficultyInstruction = "";
+      if (difficulty === '하') {
+        difficultyInstruction = "제공된 학습 내용에 명시된 사실을 그대로 확인하는 수준의 문제를 출제하세요.";
+      } else if (difficulty === '중') {
+        difficultyInstruction = "제공된 학습 내용을 실제 상황이나 새로운 사례에 적용하여 풀이해야 하는 응용 문제를 출제하세요.";
+      } else if (difficulty === '상') {
+        difficultyInstruction = "제공된 학습 내용을 기반으로 하되, 그 이상의 추론이나 관련 심화 지식을 연계하여 비판적 사고를 요구하는 확장형 문제를 출제하세요.";
+      }
 
-    let calculationInstruction = includeCalculation 
-      ? "주관식(short)과 서술형(descriptive) 문제는 반드시 제공된 수식이나 원리를 활용하여 직접 계산하거나 수치를 도출해야 하는 문제로 구성하세요."
-      : "개념 설명 위주의 문제를 구성하세요.";
+      let calculationInstruction = includeCalculation 
+        ? "주관식(short)과 서술형(descriptive) 문제는 반드시 제공된 수식이나 원리를 활용하여 직접 계산하거나 수치를 도출해야 하는 문제로 구성하세요."
+        : "개념 설명 위주의 문제를 구성하세요.";
 
-    const prompt = `당신은 에듀테크 전문 출제 위원입니다. 아래 제공된 [학습 내용]을 바탕으로 학생을 위한 맞춤형 퀴즈를 생성하세요.
+      const prompt = `당신은 에듀테크 전문 출제 위원입니다. 아래 제공된 [학습 내용]을 바탕으로 학생을 위한 맞춤형 퀴즈를 생성하세요.
 
 [학습 내용]
 ${contextText}
@@ -777,45 +789,58 @@ ${contextText}
 
 한글로 작성하세요.`;
 
-    // 4. Gemini 호출
-    const result_ai = await model.generateContent(prompt);
-    const response_ai = await result_ai.response;
-    let fullText = response_ai.text();
+      // 3. Gemini 호출
+      const result_ai = await model.generateContent(prompt);
+      const response_ai = await result_ai.response;
+      let fullText = response_ai.text();
 
-    // JSON 부분만 추출 (마크다운 코드 블록 제거 등)
-    fullText = fullText.replace(/```json|```/g, '').trim();
-    
-    try {
-      const quizData = JSON.parse(fullText);
-      
-      // DB에 문제 저장
+      // JSON 추출 및 정제
+      let cleaned = fullText.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+      const jsonStartIndex = cleaned.indexOf('[');
+      const jsonEndIndex = cleaned.lastIndexOf(']') + 1;
+      if (jsonStartIndex === -1 || jsonEndIndex === 0) throw new Error('JSON 배열을 찾을 수 없습니다.');
+      let jsonString = cleaned.substring(jsonStartIndex, jsonEndIndex);
+
+      // 특수 문자 및 줄바꿈 정밀 교정 (LaTeX 수식 대응 강화)
+      jsonString = jsonString.replace(/"((?:[^"\\]|\\.)*)"/gs, (match, inner) => {
+        // 1) 실제 줄바꿈을 \n 문자열로 변환
+        let fixed = inner.replace(/\n/g, '\\n');
+        // 2) 백슬래시 보정: JSON 표준 이스케이프가 아닌 \ 뒤의 문자는 \\로 변환
+        fixed = fixed.replace(/\\([^"\\\/bfnrtu])/g, '\\\\$1');
+        // 3) \u가 4자리 16진수가 아닌 경우 (LaTeX \underline 등) 대응
+        fixed = fixed.replace(/\\u(?![0-9a-fA-F]{4})/g, '\\\\u');
+        return `"${fixed}"`;
+      });
+
+      const quizData = JSON.parse(jsonString);
+
+      // 개별 문제들 저장
       for (const q of quizData) {
         await db.execute(
-          `INSERT INTO Questions (quiz_id, question_type, question_text, options, correct_answer, explanation, difficulty) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            quizId,
-            q.type,
-            q.question,
-            q.options ? JSON.stringify(q.options) : null,
-            q.answer,
-            q.explanation,
-            difficulty
-          ]
+          'INSERT INTO Questions (quiz_id, question_text, question_type, options, correct_answer, explanation, difficulty) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [quizId, q.question, q.type, q.options ? JSON.stringify(q.options) : null, q.answer, q.explanation, difficulty]
         );
       }
 
-      // 퀴즈 완료 상태 업데이트
-      await db.execute(`UPDATE Quizzes SET status = 'completed' WHERE id = ?`, [quizId]);
+      // 상태 완료로 변경
+      await db.execute('UPDATE Quizzes SET status = ? WHERE id = ?', ['completed', quizId]);
 
       res.json({ quizId, quizData });
-    } catch (parseErr) {
-      console.error("JSON Parse Error:", fullText);
-      await db.execute(`UPDATE Quizzes SET status = 'failed' WHERE id = ?`, [quizId]);
-      res.status(500).json({ error: "퀴즈 데이터 형식이 올바르지 않습니다. 다시 시도해주세요." });
+
+    } catch (innerErr) {
+      console.error("Quiz Logic Error:", innerErr);
+      // 실패 시 DB 레코드 즉시 삭제 (유령 데이터 방지)
+      if (quizId) {
+        await db.execute('DELETE FROM Quizzes WHERE id = ?', [quizId]);
+      }
+      res.status(500).json({ error: innerErr.message || "퀴즈 생성 중 오류가 발생했습니다." });
     }
 
   } catch (error) {
-    console.error("Quiz Generate Error:", error);
+    console.error("Outer Quiz Error:", error);
+    if (quizId) {
+      await db.execute('DELETE FROM Quizzes WHERE id = ?', [quizId]);
+    }
     res.status(500).json({ 
       error: error.status === 429 
         ? "AI 사용량 제한이 초과되었습니다. 잠시 후 다시 시도해 주세요." 
@@ -824,6 +849,7 @@ ${contextText}
   }
 });
 
+// 퀴즈 목록 조회
 app.get('/api/chats/:chatId/quizzes', async (req, res) => {
   try {
     const [rows] = await db.execute(
@@ -837,6 +863,7 @@ app.get('/api/chats/:chatId/quizzes', async (req, res) => {
   }
 });
 
+// 특정 퀴즈의 문제들 조회
 app.get('/api/quizzes/:quizId/questions', async (req, res) => {
   try {
     const [rows] = await db.execute(
@@ -850,10 +877,11 @@ app.get('/api/quizzes/:quizId/questions', async (req, res) => {
   }
 });
 
+// 서술형 채점 API
 app.post('/api/quiz/grade', async (req, res) => {
   try {
     const { question_text, correct_answer, explanation, user_answer } = req.body;
-    if (!user_answer) return res.json({ isCorrect: false, feedback: "답안이 비어있습니다." });
+    if (!user_answer) return res.json({ score: 0, feedback: "답안이 비어있습니다." });
 
     const prompt = `당신은 채점자입니다. 다음 문제와 모범 답안을 기준으로 사용자의 답안을 채점하세요.
     문제: ${question_text}
@@ -872,219 +900,42 @@ app.post('/api/quiz/grade', async (req, res) => {
     res.json(JSON.parse(fullText));
   } catch (err) {
     console.error("Grade Quiz Error:", err);
-    res.status(500).json({ error: "서술형 채점 중 오류가 발생했습니다." });
+    res.status(500).json({ error: "채점 중 오류가 발생했습니다." });
   }
 });
 
-// 퀴즈 삭제 API
+// 퀴즈 삭제
 app.delete('/api/quizzes/:quizId', async (req, res) => {
   try {
-    const quizId = req.params.quizId;
-    await db.execute('DELETE FROM Quizzes WHERE id = ?', [quizId]);
-    res.json({ message: "퀴즈가 삭제되었습니다." });
+    await db.execute('DELETE FROM Quizzes WHERE id = ?', [req.params.quizId]);
+    res.json({ success: true });
   } catch (error) {
-    console.error("Delete Quiz Error:", error);
-    res.status(500).json({ error: "퀴즈 삭제에 실패했습니다." });
+    res.status(500).json({ error: "삭제 실패" });
   }
 });
 
-// 퀴즈 제목 수정 API
+// 퀴즈 제목 수정
 app.put('/api/quizzes/:quizId/title', async (req, res) => {
   try {
-    const quizId = req.params.quizId;
     const { title } = req.body;
-    await db.execute('UPDATE Quizzes SET title = ? WHERE id = ?', [title, quizId]);
-    res.json({ message: "퀴즈 제목이 수정되었습니다." });
+    await db.execute('UPDATE Quizzes SET title = ? WHERE id = ?', [title, req.params.quizId]);
+    res.json({ success: true });
   } catch (error) {
-    console.error("Update Quiz Title Error:", error);
-    res.status(500).json({ error: "퀴즈 제목 수정에 실패했습니다." });
+    res.status(500).json({ error: "수정 실패" });
   }
 });
 
-// 프로젝트 삭제 API
+// 프로젝트(채팅방) 삭제 API 복구
 app.delete('/api/chats/:chatId', async (req, res) => {
   try {
     const chatId = req.params.chatId;
+    // Chats 테이블 삭제 시 ON DELETE CASCADE 설정으로 인해 
+    // Messages(노드)와 Quizzes(퀴즈) 테이블의 관련 데이터도 자동으로 삭제됩니다.
     await db.execute('DELETE FROM Chats WHERE id = ?', [chatId]);
     res.json({ message: "프로젝트가 삭제되었습니다." });
   } catch (error) {
     console.error("Delete Chat Error:", error);
     res.status(500).json({ error: "프로젝트 삭제에 실패했습니다." });
-  }
-});
-
-// --- 퀴즈 관련 API ---
-
-app.get('/api/chats/:chatId/quizzes', async (req, res) => {
-  try {
-    const chatId = req.params.chatId;
-    const [quizzes] = await db.execute(
-      'SELECT id, title, status, config FROM Quizzes WHERE chat_id = ? ORDER BY created_at DESC',
-      [chatId]
-    );
-    res.json(quizzes);
-  } catch (err) {
-    console.error("Fetch Quizzes Error:", err);
-    res.status(500).json({ error: "퀴즈 목록을 불러오지 못했습니다." });
-  }
-});
-
-app.get('/api/quizzes/:quizId/questions', async (req, res) => {
-  try {
-    const quizId = req.params.quizId;
-    const [questions] = await db.execute(
-      'SELECT id, question_text, question_type, options, correct_answer, explanation FROM Questions WHERE quiz_id = ?',
-      [quizId]
-    );
-    res.json(questions);
-  } catch (err) {
-    console.error("Fetch Questions Error:", err);
-    res.status(500).json({ error: "문제를 불러오지 못했습니다." });
-  }
-});
-
-app.post('/api/quiz/generate', async (req, res) => {
-  try {
-    const { chatId, selectedNodeIds, config } = req.body;
-    console.log("Quiz Generate Request - chatId:", chatId);
-    const { types, difficulty, includeCalculation } = config;
-
-    if (!selectedNodeIds || selectedNodeIds.length === 0) {
-      return res.status(400).json({ error: "출제 범위를 선택해주세요." });
-    }
-
-    // 1. 선택된 노드들의 텍스트 데이터 수집
-    const placeholders = selectedNodeIds.map(() => '?').join(',');
-    const [nodes] = await db.execute(
-      `SELECT question_text, answer_text, node_title FROM Messages WHERE id IN (${placeholders})`,
-      selectedNodeIds
-    );
-
-    if (nodes.length === 0) {
-      return res.status(404).json({ error: "학습 데이터를 찾을 수 없습니다." });
-    }
-
-    const contextText = nodes.map(n => 
-      `제목: ${n.node_title}\n질문: ${n.question_text}\n내용: ${n.answer_text}`
-    ).join('\n\n---\n\n');
-
-    // 2. 난이도 및 계산 로직에 따른 프롬프트 구성
-    let difficultyInstruction = "";
-    if (difficulty === '하') {
-      difficultyInstruction = "제공된 학습 내용에 명시된 사실을 그대로 확인하는 수준의 문제를 출제하세요.";
-    } else if (difficulty === '중') {
-      difficultyInstruction = "제공된 학습 내용을 실제 상황이나 새로운 사례에 적용하여 풀이해야 하는 응용 문제를 출제하세요.";
-    } else if (difficulty === '상') {
-      difficultyInstruction = "제공된 학습 내용을 기반으로 하되, 그 이상의 추론이나 관련 심화 지식을 연계하여 비판적 사고를 요구하는 확장형 문제를 출제하세요.";
-    }
-
-    let calculationInstruction = includeCalculation 
-      ? "주관식(short)과 서술형(descriptive) 문제는 반드시 제공된 수식이나 원리를 활용하여 직접 계산하거나 수치를 도출해야 하는 문제로 구성하세요."
-      : "개념 설명 위주의 문제를 구성하세요.";
-
-    const prompt = `당신은 에듀테크 전문 출제 위원입니다. 아래 제공된 [학습 내용]을 바탕으로 학생을 위한 맞춤형 퀴즈를 생성하세요.
-
-[학습 내용]
-${contextText}
-
-[출제 요구사항]
-1. 문제 유형 및 개수:
-   - OX 문제: ${types.ox}개
-   - 객관식: ${types.multiple}개
-   - 주관식: ${types.short}개
-   - 서술형: ${types.descriptive}개
-2. 난이도 전략 [${difficulty}]: ${difficultyInstruction}
-3. 계산 문제 포함 여부: ${calculationInstruction}
-4. 모든 문제는 제공된 [학습 내용]의 범위를 벗어나지 않으면서도 난이도 전략에 충실해야 합니다.
-5. 응답은 반드시 아래의 JSON 배열 형식으로만 작성하세요. 텍스트 설명은 포함하지 마세요.
-
-[응답 형식 예시]
-[
-  {
-    "type": "ox",
-    "question": "질문 내용",
-    "answer": "O 또는 X",
-    "explanation": "해설 내용"
-  },
-  {
-    "type": "multiple",
-    "question": "질문 내용",
-    "options": ["보기1", "보기2", "보기3", "보기4"],
-    "answer": "정답 내용(보기 중 하나)",
-    "explanation": "해설 내용"
-  },
-  {
-    "type": "short",
-    "question": "질문 내용",
-    "answer": "단답형 정답",
-    "explanation": "해설 내용"
-  },
-  {
-    "type": "descriptive",
-    "question": "질문 내용",
-    "answer": "모범 답안 핵심 키워드 또는 문장",
-    "explanation": "상세 채점 기준 및 해설"
-  }
-]
-
-한글로 작성하세요.`;
-
-    // 3. Gemini 호출
-    const result_ai = await model.generateContent(prompt);
-    const response_ai = await result_ai.response;
-    let fullText = response_ai.text();
-
-    // JSON 부분만 추출 (마크다운 코드 블록 제거 등)
-    fullText = fullText.replace(/```json|```/g, '').trim();
-    
-    try {
-      const quizData = JSON.parse(fullText);
-
-      // 채팅방 제목 가져오기 (테이블명 소문자 chats로 변경)
-      let chatTitle = '프로젝트';
-      try {
-        const [chatRows] = await db.execute('SELECT title FROM chats WHERE id = ?', [chatId]);
-        if (chatRows.length > 0 && chatRows[0].title) {
-          chatTitle = chatRows[0].title;
-        }
-      } catch (chatErr) {
-        console.error("Chat Title Fetch Error:", chatErr);
-      }
-
-      const finalTitle = `${chatTitle} 퀴즈`;
-      console.log(`Quiz Save - chatId: ${chatId}, title: ${finalTitle}`);
-
-      // 1. 퀴즈 마스터 정보 저장
-      const [quizResult] = await db.execute(
-        'INSERT INTO Quizzes (chat_id, title, config, status) VALUES (?, ?, ?, ?)',
-        [chatId, finalTitle, JSON.stringify(config), 'completed']
-      );
-      const quizId = quizResult.insertId;
-
-      // 2. 개별 문제들 저장
-      for (const q of quizData) {
-        await db.execute(
-          'INSERT INTO Questions (quiz_id, question_text, question_type, options, correct_answer, explanation) VALUES (?, ?, ?, ?, ?, ?)',
-          [quizId, q.question, q.type, q.options ? JSON.stringify(q.options) : null, q.answer, q.explanation]
-        );
-      }
-
-      // 3. 퀴즈 완료 상태 업데이트
-      await db.execute('UPDATE Quizzes SET status = ? WHERE id = ?', ['completed', quizId]);
-
-      res.json({ quizId, quizData });
-    } catch (parseErr) {
-      console.error("JSON Parse or DB Error:", fullText, parseErr);
-      res.status(500).json({ error: "퀴즈 생성 결과 처리 중 오류가 발생했습니다." });
-    }
-
-  } catch (error) {
-    console.error("Quiz Generate Error:", error);
-    res.status(500).json({ 
-      error: error.status === 429 
-        ? "AI 사용량 제한이 초과되었습니다. 잠시 후 다시 시도해 주세요." 
-        : "퀴즈 생성에 실패했습니다." 
-    });
   }
 });
 

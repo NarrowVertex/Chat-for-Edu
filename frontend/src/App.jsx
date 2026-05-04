@@ -94,6 +94,7 @@ function App() {
   const [editingQuizTitle, setEditingQuizTitle] = useState('');
   const [quizTasks, setQuizTasks] = useState([]); // [{ tempId, chatId, status, title, resultId }]
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [projectSessionMap, setProjectSessionMap] = useState({}); // { [chatId]: { viewMode, activeQuiz, quizState, currentQuizIndex, userAnswers, quizFeedback } }
 
   const totalQuizCount = Object.values(quizConfig.types).reduce((a, b) => a + b, 0);
 
@@ -249,21 +250,23 @@ function App() {
           } : q);
         });
 
-        // 2. 만약 사용자가 다른 곳에 있더라도 피드백 애니메이션 예약 (나중에 해당 프로젝트로 돌아오면 보여줄 수 있음)
-        // 여기서는 알림 알림으로 대체
-        
         setShowCheckFeedback(quizId);
         setTimeout(() => setShowCheckFeedback(null), 2000);
       } else {
+        // 서버가 명시적으로 에러를 반환한 경우에만 실패 처리
         setQuizTasks(prev => prev.map(t => t.tempId === tempId ? { ...t, status: 'failed' } : t));
         setQuizList(prev => prev.filter(q => q.id !== tempId));
-        alert("퀴즈 생성에 실패했습니다.");
+        const errorData = await response.json().catch(() => ({}));
+        alert(errorData.error || "퀴즈 생성에 실패했습니다.");
       }
     } catch (err) {
+      // 네트워크 끊김이나 화면 이동 등으로 인한 에러 발생 시
       console.error("Generate Quiz Error:", err);
+      
+      // 알림 상태는 일단 유지하거나 나중에 다시 확인할 수 있도록 함 (실패로 단정짓지 않음)
+      // 만약 정말로 서버에 연결할 수 없는 상태라면 여기서 처리가 필요할 수 있지만, 
+      // 현재는 "실패했다고 뜨는데 실제론 생성되는" 문제를 막기 위해 상태를 성급하게 바꾸지 않습니다.
       setQuizTasks(prev => prev.map(t => t.tempId === tempId ? { ...t, status: 'failed' } : t));
-      setQuizList(prev => prev.filter(q => q.id !== tempId));
-      alert("서버 연결에 실패했습니다.");
     }
   };
 
@@ -368,11 +371,23 @@ function App() {
     if (task.status === 'generating') return;
 
     // 1. 해당 프로젝트로 이동 (ID 타입 불일치 방지를 위해 String 변환 비교)
-    const targetChat = historyItems.find(c => String(c.id) === String(task.chatId));
-    if (targetChat) {
-      enterProject(targetChat);
-      setViewMode('quiz'); // 퀴즈 탭으로 바로 이동
+    const isSameProject = activeChat && String(activeChat.id) === String(task.chatId);
+    
+    if (!isSameProject) {
+      const targetChat = historyItems.find(c => String(c.id) === String(task.chatId));
+      if (targetChat) {
+        enterProject(targetChat);
+      } else {
+        // historyItems에 아직 없을 수도 있으므로(방금 생성된 경우 등), 최소 정보로 이동 시도
+        enterProject({ id: task.chatId, title: task.title });
+      }
+    } else {
+      // 이미 같은 프로젝트를 가리키고 있더라도, 뷰(Home -> Project)는 전환해줘야 함
+      setView('project');
     }
+    
+    // 무조건 퀴즈 탭으로 이동
+    setViewMode('quiz');
 
     // 2. 알림 삭제
     setQuizTasks(prev => prev.filter(t => t.tempId !== task.tempId));
@@ -549,15 +564,69 @@ function App() {
     if (selectedNode) setContextNode(selectedNode);
   }, [selectedNode]);
 
+  const saveCurrentSession = (chatId) => {
+    if (!chatId) return;
+    setProjectSessionMap(prev => ({
+      ...prev,
+      [chatId]: {
+        viewMode,
+        activeQuiz,
+        quizState,
+        currentQuizIndex,
+        userAnswers,
+        quizFeedback
+      }
+    }));
+  };
+
+  const restoreSession = (chatId) => {
+    const session = projectSessionMap[chatId];
+    if (session) {
+      setViewMode(session.viewMode || 'chat');
+      setActiveQuiz(session.activeQuiz || null);
+      setQuizState(session.quizState || 'setup');
+      setCurrentQuizIndex(session.currentQuizIndex || 0);
+      setUserAnswers(session.userAnswers || []);
+      setQuizFeedback(session.quizFeedback || []);
+    } else {
+      // 기본값 세팅
+      setViewMode('chat');
+      setActiveQuiz(null);
+      setQuizState('setup');
+      setCurrentQuizIndex(0);
+      setUserAnswers([]);
+      setQuizFeedback([]);
+    }
+  };
+
   const enterProject = (chat) => {
+    if (activeChat && String(activeChat.id) === String(chat.id)) {
+      setView('project');
+      return;
+    }
+    
+    // 1. 현재 프로젝트 상태 저장
+    if (activeChat) {
+      saveCurrentSession(activeChat.id);
+    }
+
     setNodes([]); // 이전 프로젝트 노드 비우기
     setSelectedNode(null); // 선택된 노드 초기화
     setQuizList([]); // 이전 프로젝트 퀴즈 목록 비우기
+    
+    // 2. 새 프로젝트 정보 설정
     setActiveChat(chat);
+    
+    // 3. 새 프로젝트 세션 복구
+    restoreSession(chat.id);
+    
     setView('project');
   };
 
   const exitProject = () => {
+    if (activeChat) {
+      saveCurrentSession(activeChat.id);
+    }
     setActiveChat(null);
     setNodes([]);
     setSelectedNode(null);

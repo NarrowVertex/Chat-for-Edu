@@ -40,12 +40,21 @@ async function migrate() {
         `);
         console.log('Quizzes 테이블 확인/생성 완료');
 
-        // 3. Quizzes 테이블에 title 컬럼이 없는 경우를 위한 추가 체크
+        // 3. Quizzes 테이블 컬럼 체크 (title, config)
         try {
             await connection.query(`ALTER TABLE Quizzes ADD COLUMN title VARCHAR(255) AFTER chat_id`);
             console.log('Quizzes 테이블에 title 컬럼을 추가했습니다.');
         } catch (err) {
-            if (err.code !== 'ER_DUP_COLUMN_NAME') console.log('title 컬럼이 이미 존재하거나 확인되었습니다.');
+            if (err.code === 'ER_DUP_COLUMN_NAME') console.log('Quizzes: title 컬럼이 이미 존재합니다.');
+            else console.error('Quizzes title 추가 에러:', err);
+        }
+
+        try {
+            await connection.query(`ALTER TABLE Quizzes ADD COLUMN config JSON AFTER status`);
+            console.log('Quizzes 테이블에 config 컬럼을 추가했습니다.');
+        } catch (err) {
+            if (err.code === 'ER_DUP_COLUMN_NAME') console.log('Quizzes: config 컬럼이 이미 존재합니다.');
+            else console.error('Quizzes config 추가 에러:', err);
         }
 
         // 4. 개별 퀴즈 문제 테이블 생성 (Questions)
@@ -58,11 +67,21 @@ async function migrate() {
                 options JSON,
                 correct_answer TEXT,
                 explanation TEXT,
+                difficulty VARCHAR(50),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (quiz_id) REFERENCES Quizzes(id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         `);
         console.log('Questions 테이블 확인/생성 완료');
+
+        // 5. Questions 테이블에 difficulty 컬럼 체크
+        try {
+            await connection.query(`ALTER TABLE Questions ADD COLUMN difficulty VARCHAR(50) AFTER explanation`);
+            console.log('Questions 테이블에 difficulty 컬럼을 추가했습니다.');
+        } catch (err) {
+            if (err.code === 'ER_DUP_COLUMN_NAME') console.log('Questions: difficulty 컬럼이 이미 존재합니다.');
+            else console.error('Questions difficulty 추가 에러:', err);
+        }
 
         console.log('모든 마이그레이션이 성공적으로 완료되었습니다.');
     } catch (error) {
