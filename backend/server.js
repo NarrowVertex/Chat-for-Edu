@@ -8,9 +8,27 @@ const fs = require('fs');
 const multer = require('multer');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// Gemini API 초기화 (안정적인 1.5 Flash 모델 사용)
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+// AI 모델 설정 로드
+const modelsConfigPath = path.join(__dirname, 'ai-models.json');
+let availableModels = [];
+if (fs.existsSync(modelsConfigPath)) {
+  availableModels = JSON.parse(fs.readFileSync(modelsConfigPath, 'utf8'));
+}
+
+// 특정 모델 인스턴스를 가져오는 헬퍼 함수
+function getAIInstance(modelId) {
+  const modelConfig = availableModels.find(m => m.id === modelId) || availableModels[0];
+  if (!modelConfig) throw new Error("사용 가능한 AI 모델 설정이 없습니다.");
+  
+  const apiKey = process.env[modelConfig.apiKeyEnv];
+  const genAIInstance = new GoogleGenerativeAI(apiKey);
+  return genAIInstance.getGenerativeModel({ 
+    model: modelConfig.endpoint,
+    generationConfig: {
+      temperature: modelConfig.temperature || 0.7
+    }
+  });
+}
 
 // 이미지 데이터를 Gemini API용 포맷으로 변환하는 함수
 function fileToGenerativePart(path, mimeType) {
@@ -131,7 +149,14 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: "존재하지 않는 정보입니다" });
     }
 
-    res.json({ message: "로그인 성공", user: { id: user.id, user_id: user.user_id } });
+    res.json({ 
+      message: "로그인 성공", 
+      user: { 
+        id: user.id, 
+        user_id: user.user_id,
+        preferred_model: user.preferred_model 
+      } 
+    });
   } catch (error) {
     console.error("Login Error:", error);
     res.status(500).json({ error: "서버 내부 오류가 발생했습니다." });
@@ -147,6 +172,33 @@ app.delete('/api/auth/user/:id', async (req, res) => {
   } catch (error) {
     console.error("Delete Account Error:", error);
     res.status(500).json({ error: "서버 내부 오류가 발생했습니다." });
+  }
+});
+
+// --- AI 모델 관련 API ---
+
+// 사용 가능한 모델 리스트 가져오기
+app.get('/api/ai-models', (req, res) => {
+  // API Key 환경변수명은 제외하고 클라이언트에 전달
+  const clientModels = availableModels.map(({ apiKeyEnv, ...rest }) => rest);
+  res.json(clientModels);
+});
+
+// 유저 선호 모델 업데이트
+app.patch('/api/auth/user/:id/preferred-model', async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { preferred_model } = req.body;
+    
+    // 모델 존재 여부 확인 (null인 경우는 리스트의 첫번째로 간주되게 함)
+    const modelExists = availableModels.some(m => m.id === preferred_model);
+    const modelToSave = modelExists ? preferred_model : (availableModels[0]?.id || null);
+
+    await db.execute('UPDATE Users SET preferred_model = ? WHERE id = ?', [modelToSave, userId]);
+    res.json({ message: "선호 모델이 업데이트되었습니다.", preferred_model: modelToSave });
+  } catch (error) {
+    console.error("Update Preferred Model Error:", error);
+    res.status(500).json({ error: "선호 모델 업데이트에 실패했습니다." });
   }
 });
 
@@ -278,7 +330,7 @@ app.patch('/api/chats/:id', async (req, res) => {
 // 새로운 채팅 생성 및 첫 Q&A 노드 저장
 app.post('/api/chats', upload.single('photo'), async (req, res) => {
   try {
-    const { owner_id, text_content } = req.body;
+    const { owner_id, text_content, model_id } = req.body;
     const photo_url = req.file ? `/uploads/${req.file.filename}` : null;
 
     // 1. Gemini를 통해 제목과 답변 동시 생성 요청
@@ -299,7 +351,15 @@ app.post('/api/chats', upload.single('photo'), async (req, res) => {
       parts.push(fileToGenerativePart(req.file.path, req.file.mimetype));
     }
 
-    const result_ai = await model.generateContent(parts);
+    // 사용자 선호 모델 조회 (model_id가 없을 경우 대비)
+    let finalModelId = model_id;
+    if (!finalModelId) {
+      const [userRows] = await db.execute('SELECT preferred_model FROM Users WHERE id = ?', [owner_id]);
+      finalModelId = userRows[0]?.preferred_model || availableModels[0]?.id;
+    }
+
+    const aiModel = getAIInstance(finalModelId);
+    const result_ai = await aiModel.generateContent(parts);
     const response_ai = await result_ai.response;
     const fullText = response_ai.text();
 
@@ -473,7 +533,7 @@ app.post('/api/nodes/connect', async (req, res) => {
 // 기존 노드에서 파생된 새로운 Q&A 노드 생성
 app.post('/api/nodes', upload.single('photo'), async (req, res) => {
   try {
-    let { chat_id, parent_id, reference_node_id, text_content, node_label, node_type, answer_text } = req.body;
+    let { chat_id, parent_id, reference_node_id, text_content, node_label, node_type, answer_text, model_id } = req.body;
     const photo_url = req.file ? `/uploads/${req.file.filename}` : null;
 
     if (parent_id === "null" || parent_id === "" || parent_id === undefined) parent_id = null;
@@ -522,8 +582,20 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
         parts: currentParts
       });
 
+      // 모델 결정
+      let finalModelId = model_id;
+      if (!finalModelId) {
+        const [[chatInfo]] = await db.execute('SELECT owner_id FROM Chats WHERE id = ?', [chat_id]);
+        if (chatInfo) {
+          const [userRows] = await db.execute('SELECT preferred_model FROM Users WHERE id = ?', [chatInfo.owner_id]);
+          finalModelId = userRows[0]?.preferred_model;
+        }
+        finalModelId = finalModelId || availableModels[0]?.id;
+      }
+
+      const aiModel = getAIInstance(finalModelId);
       // 3. gemini 호출 (generateContent를 사용하여 전체 문맥 전달)
-      const result_ai = await model.generateContent({ contents });
+      const result_ai = await aiModel.generateContent({ contents });
       const response_ai = await result_ai.response;
       const fullText = response_ai.text();
 
@@ -559,6 +631,7 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
 // AI 답변 재생성 API
 app.put('/api/messages/:id/regenerate', async (req, res) => {
   const { id } = req.params;
+  const { model_id } = req.body;
   try {
     // 1. 기존 메시지 정보 조회 (질문 텍스트 및 부모 ID 확보)
     const [messages] = await db.execute('SELECT * FROM Messages WHERE id = ?', [id]);
@@ -599,7 +672,22 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
 
     contents.push({ role: "user", parts: currentParts });
 
-    const result_ai = await model.generateContent({ contents });
+    // 모델 결정
+    let finalModelId = model_id;
+    if (!finalModelId) {
+      const [[msgInfo]] = await db.execute('SELECT chat_id FROM Messages WHERE id = ?', [id]);
+      if (msgInfo) {
+        const [[chatInfo]] = await db.execute('SELECT owner_id FROM Chats WHERE id = ?', [msgInfo.chat_id]);
+        if (chatInfo) {
+          const [userRows] = await db.execute('SELECT preferred_model FROM Users WHERE id = ?', [chatInfo.owner_id]);
+          finalModelId = userRows[0]?.preferred_model;
+        }
+      }
+      finalModelId = finalModelId || availableModels[0]?.id;
+    }
+
+    const aiModel = getAIInstance(finalModelId);
+    const result_ai = await aiModel.generateContent({ contents });
     const response_ai = await result_ai.response;
     const fullText = response_ai.text();
 

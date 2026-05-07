@@ -1924,3 +1924,36 @@ body {
   opacity: 0.15;
   cursor: not-allowed;
 }
+/* AI 모델 선택 박스 스타일 */
+.model-selector-wrapper {
+  display: flex;
+  align-items: center;
+  margin-left: 8px;
+}
+
+.model-select-dropdown {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  max-width: 150px;
+}
+
+.model-select-dropdown:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.model-select-dropdown:focus {
+  border-color: var(--primary-neon);
+}
+
+.model-select-dropdown option {
+  background-color: #1e222a;
+  color: var(--text-primary);
+}

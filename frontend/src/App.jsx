@@ -66,6 +66,9 @@ function App() {
 
   // AI 응답 로딩 상태
   const [isGenerating, setIsGenerating] = useState(false);
+  const [availableModels, setAvailableModels] = useState([]);
+  const [selectedModelId, setSelectedModelId] = useState('');
+  
   const textareaRef = useRef(null);
   const contextSelectorRef = useRef(null);
 
@@ -163,6 +166,49 @@ function App() {
 
     return () => document.removeEventListener('mousedown', handleClickOutside, true);
   }, [isContextSelectorOpen]);
+
+  // 사용 가능한 AI 모델 목록 불러오기
+  const fetchModels = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/api/ai-models');
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableModels(data);
+      }
+    } catch (err) {
+      console.error('Fetch Models Error:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchModels();
+  }, []);
+
+  // 로그인 시 혹은 모델 목록 로드 시 선택된 모델 동기화
+  useEffect(() => {
+    if (availableModels.length > 0) {
+      if (currentUser?.preferred_model && availableModels.some(m => m.id === currentUser.preferred_model)) {
+        setSelectedModelId(currentUser.preferred_model);
+      } else {
+        setSelectedModelId(availableModels[0].id);
+      }
+    }
+  }, [currentUser, availableModels]);
+
+  const handleModelChange = async (modelId) => {
+    setSelectedModelId(modelId);
+    if (currentUser) {
+      try {
+        await fetch(`http://localhost:5000/api/auth/user/${currentUser.id}/preferred-model`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preferred_model: modelId })
+        });
+      } catch (err) {
+        console.error('Update Preferred Model Error:', err);
+      }
+    }
+  };
 
   // 사용자의 채팅 목록 불러오기
   const fetchChats = async (userId) => {
@@ -403,7 +449,9 @@ function App() {
     setIsGenerating(true);
     try {
       const response = await fetch(`http://localhost:5000/api/messages/${selectedNode.id}/regenerate`, {
-        method: 'PUT'
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_id: selectedModelId })
       });
       const data = await response.json();
       if (response.ok) {
@@ -531,6 +579,7 @@ function App() {
         const formData = new FormData();
         formData.append('owner_id', currentUser.id);
         formData.append('text_content', inputText);
+        formData.append('model_id', selectedModelId);
         if (selectedImage) formData.append('photo', selectedImage);
 
         const response = await fetch('http://localhost:5000/api/chats', {
@@ -562,6 +611,7 @@ function App() {
       const formData = new FormData();
       formData.append('chat_id', activeChat.id);
       formData.append('text_content', inputText);
+      formData.append('model_id', selectedModelId);
 
       if (isContentBlock) {
         formData.append('reference_node_id', "");
@@ -1224,6 +1274,24 @@ function App() {
                     <Paperclip size={20} style={{ opacity: isGenerating ? 0.5 : 1 }} />
                     <input type="file" style={{ display: 'none' }} onChange={(e) => processImageFile(e.target.files[0])} disabled={isGenerating} />
                   </label>
+
+                  {/* AI 모델 선택 박스 */}
+                  {availableModels.length > 0 && (
+                    <div className="model-selector-wrapper">
+                      <select 
+                        className="model-select-dropdown"
+                        value={selectedModelId}
+                        onChange={(e) => handleModelChange(e.target.value)}
+                        disabled={isGenerating}
+                      >
+                        {availableModels.map(model => (
+                          <option key={model.id} value={model.id}>
+                            {model.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
                 <div className="input-actions-right">
                   {view === 'project' && (
