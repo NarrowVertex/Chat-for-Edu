@@ -27,6 +27,49 @@ async function migrate() {
         `);
         console.log('새 외래키 제약 조건 변경 완료: 제약 조건(messages_ibfk_2)');
 
+        // 2. Quizzes 테이블 생성
+        await connection.query(`
+            CREATE TABLE IF NOT EXISTS Quizzes (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                chat_id INT NOT NULL,
+                title VARCHAR(255),
+                status VARCHAR(50) DEFAULT 'ready',
+                config JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (chat_id) REFERENCES Chats(id) ON DELETE CASCADE
+            )
+        `);
+        console.log('Quizzes 테이블 확인/생성 완료');
+
+        // 3. Questions 테이블 생성
+        await connection.query(`
+            CREATE TABLE IF NOT EXISTS Questions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                quiz_id INT NOT NULL,
+                question_text TEXT,
+                question_type VARCHAR(50),
+                options JSON,
+                correct_answer TEXT,
+                explanation TEXT,
+                FOREIGN KEY (quiz_id) REFERENCES Quizzes(id) ON DELETE CASCADE
+            )
+        `);
+        console.log('Questions 테이블 확인/생성 완료');
+
+        // 4. Questions 테이블 컬럼 추가 마이그레이션
+        const [columns] = await connection.query(`SHOW COLUMNS FROM Questions`);
+        const columnNames = columns.map(c => c.Field);
+
+        if (!columnNames.includes('difficulty')) {
+            await connection.query('ALTER TABLE Questions ADD COLUMN difficulty VARCHAR(50) AFTER explanation');
+            console.log('Questions 테이블에 difficulty 컬럼 추가 완료');
+        }
+
+        if (!columnNames.includes('created_at')) {
+            await connection.query('ALTER TABLE Questions ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER difficulty');
+            console.log('Questions 테이블에 created_at 컬럼 추가 완료');
+        }
+
         console.log('모든 마이그레이션이 성공적으로 완료되었습니다.');
     } catch (error) {
         console.error('마이그레이션 도중 에러 발생:', error);
