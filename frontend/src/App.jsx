@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Menu, Plus, Compass, Sparkles, Mic, Paperclip, MessageSquare, MessageCircle, X,
   ArrowLeft, Search, Share2, Star, Edit3, RotateCcw, ThumbsUp, ThumbsDown,
@@ -11,6 +12,12 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import NodeTreeView from './NodeTreeView';
 
+// AI 답변에서 가끔 섞여 들어오는 <br> 류 HTML 태그를 마크다운 줄바꿈으로 치환
+const sanitizeMarkdown = (text) => {
+  if (text == null) return '';
+  return String(text).replace(/<br\s*\/?>(\s*<br\s*\/?>)*\s*/gi, '\n\n');
+};
+
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [view, setView] = useState('login'); // 'login', 'home', 'project'
@@ -22,6 +29,13 @@ function App() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeleteNodeModalOpen, setIsDeleteNodeModalOpen] = useState(false);
   const [isDeleteProjectModalOpen, setIsDeleteProjectModalOpen] = useState(false);
+
+  // Sidebar History Item States (이름 변경 / 삭제 메뉴)
+  const [historyMenuOpenId, setHistoryMenuOpenId] = useState(null);
+  const [historyMenuPos, setHistoryMenuPos] = useState(null); // { top, right } — 포털용 좌표
+  const [editingHistoryId, setEditingHistoryId] = useState(null);
+  const [editingHistoryTitle, setEditingHistoryTitle] = useState('');
+  const [deleteHistoryItem, setDeleteHistoryItem] = useState(null);
 
   // Project/Node States
   const [activeChat, setActiveChat] = useState(null);
@@ -55,6 +69,12 @@ function App() {
   // Node Title Editing State
   const [isEditingNodeTitle, setIsEditingNodeTitle] = useState(false);
   const [editedNodeTitle, setEditedNodeTitle] = useState('');
+
+  // Image Modal State
+  const [enlargedImage, setEnlargedImage] = useState(null);
+
+  // Drag and Drop State
+  const [isDragging, setIsDragging] = useState(false);
 
   // Smart Icon Toggle States
   const [activeIcons, setActiveIcons] = useState({ next: false, node: false, sparkle: false });
@@ -552,6 +572,60 @@ function App() {
     }
   }, [currentUser]);
 
+  // 로그인된 사용자별로 localStorage에서 노드 모드 viewport 복원
+  // 로그아웃하거나 다른 계정으로 바꾸면 이전 사용자의 viewport는 메모리에서 제거됨
+  useEffect(() => {
+    if (!currentUser?.id) {
+      // 로그아웃 시 viewport 메모리에서 제거 (다른 사용자 데이터 누출 방지)
+      setProjectSessionMap(prev => {
+        const next = {};
+        for (const [cid, session] of Object.entries(prev)) {
+          const { viewport, ...rest } = session;
+          next[cid] = rest;
+        }
+        return next;
+      });
+      return;
+    }
+    try {
+      const saved = localStorage.getItem(`gemini_node_viewports_${currentUser.id}`);
+      if (!saved) return;
+      const viewports = JSON.parse(saved);
+      setProjectSessionMap(prev => {
+        const next = { ...prev };
+        for (const [chatId, viewport] of Object.entries(viewports)) {
+          next[chatId] = { ...(next[chatId] || {}), viewport };
+        }
+        return next;
+      });
+    } catch (err) {
+      console.error('Load viewports error:', err);
+    }
+  }, [currentUser]);
+
+  // 사이드바 메뉴 열려있을 때 외부 클릭 / Esc 감지하여 닫기
+  useEffect(() => {
+    if (historyMenuOpenId === null) return;
+    const handleOutsideClick = (e) => {
+      if (e.target.closest('.history-action-menu')) return;
+      if (e.target.closest('.history-item-menu-btn')) return;
+      setHistoryMenuOpenId(null);
+      setHistoryMenuPos(null);
+    };
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') {
+        setHistoryMenuOpenId(null);
+        setHistoryMenuPos(null);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleEsc);
+    };
+  }, [historyMenuOpenId]);
+
   useEffect(() => {
     if (activeChat) {
       fetchNodes(activeChat.id);
@@ -569,6 +643,7 @@ function App() {
     setProjectSessionMap(prev => ({
       ...prev,
       [chatId]: {
+        ...(prev[chatId] || {}), // 기존 viewport 등 보존
         viewMode,
         activeQuiz,
         quizState,
@@ -577,6 +652,31 @@ function App() {
         quizFeedback
       }
     }));
+  };
+
+  // 노드 모드 viewport(pan/zoom) 위치 저장 — pan/zoom 종료 시점에만 호출됨
+  // 메모리(projectSessionMap) + localStorage 둘 다 갱신하며 사용자별로 분리
+  const handleNodeViewportChange = (viewport) => {
+    if (!activeChat?.id || !currentUser?.id) return;
+    setProjectSessionMap(prev => {
+      const next = {
+        ...prev,
+        [activeChat.id]: {
+          ...(prev[activeChat.id] || {}),
+          viewport
+        }
+      };
+      try {
+        const onlyViewports = {};
+        for (const [cid, session] of Object.entries(next)) {
+          if (session.viewport) onlyViewports[cid] = session.viewport;
+        }
+        localStorage.setItem(`gemini_node_viewports_${currentUser.id}`, JSON.stringify(onlyViewports));
+      } catch (err) {
+        console.error('Save viewports error:', err);
+      }
+      return next;
+    });
   };
 
   const restoreSession = (chatId) => {
@@ -866,6 +966,81 @@ function App() {
     }
   };
 
+  // 사이드바 블록 메뉴 토글 (⋯ 클릭) — ⋯ 버튼의 위치를 계산해 포털로 띄울 좌표 저장
+  const handleHistoryMenuToggle = (item, e) => {
+    e.stopPropagation();
+    if (historyMenuOpenId === item.id) {
+      setHistoryMenuOpenId(null);
+      setHistoryMenuPos(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    setHistoryMenuPos({
+      top: rect.bottom + 4,
+      right: window.innerWidth - rect.right
+    });
+    setHistoryMenuOpenId(item.id);
+  };
+
+  // 사이드바 블록 이름 변경 시작
+  const handleHistoryRenameStart = (item, e) => {
+    if (e) e.stopPropagation();
+    setEditingHistoryId(item.id);
+    setEditingHistoryTitle(item.title);
+    setHistoryMenuOpenId(null);
+    setHistoryMenuPos(null);
+  };
+
+  // 사이드바 블록 이름 변경 저장 (PATCH)
+  const handleHistoryRenameSubmit = async (chatId) => {
+    const newTitle = editingHistoryTitle.trim();
+    if (!newTitle) {
+      setEditingHistoryId(null);
+      return;
+    }
+    try {
+      const response = await fetch(`http://localhost:5000/api/chats/${chatId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTitle })
+      });
+      if (response.ok) {
+        if (activeChat && String(activeChat.id) === String(chatId)) {
+          setActiveChat({ ...activeChat, title: newTitle });
+        }
+        if (currentUser) fetchChats(currentUser.id);
+      }
+    } catch (err) {
+      console.error('Rename History Error:', err);
+    } finally {
+      setEditingHistoryId(null);
+    }
+  };
+
+  // 사이드바 블록 삭제 확정 (DELETE)
+  const handleHistoryDeleteConfirm = async () => {
+    if (!deleteHistoryItem) return;
+    const targetId = deleteHistoryItem.id;
+    try {
+      const response = await fetch(`http://localhost:5000/api/chats/${targetId}`, {
+        method: 'DELETE'
+      });
+      if (response.ok) {
+        if (activeChat && String(activeChat.id) === String(targetId)) {
+          setActiveChat(null);
+          setNodes([]);
+          setSelectedNode(null);
+          setView('home');
+        }
+        if (currentUser) fetchChats(currentUser.id);
+      }
+    } catch (err) {
+      console.error('Delete History Error:', err);
+    } finally {
+      setDeleteHistoryItem(null);
+    }
+  };
+
   const generateNodeLabel = (parent, isSub) => {
     // 이제 백엔드에서 모든 라벨링을 전담하므로, 프론트엔드에서는 
     // 생성 전 임시 표시용 자리표시자만 반환합니다.
@@ -991,6 +1166,39 @@ function App() {
     reader.readAsDataURL(file);
   };
 
+  // --- Drag and Drop Handlers ---
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // 드래그가 영역 밖으로 완전히 나갔을 때만 상태 해제
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processImageFile(e.dataTransfer.files[0]);
+      e.dataTransfer.clearData();
+    }
+  };
+
   const clearImage = () => {
     setSelectedImage(null);
     setImagePreviewUrl(null);
@@ -1029,8 +1237,26 @@ function App() {
   }
 
   return (
-    <div className="app-container">
+    <div 
+      className="app-container"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <div className="mesh-background"></div>
+      {/* 드래그 앤 드롭 오버레이 */}
+      {isDragging && (
+        <div className="drag-drop-overlay">
+          <div className="drag-drop-box">
+            <div className="drag-drop-icon-wrap">
+              <Paperclip size={48} color="#4285f4" />
+            </div>
+            <h3>사진을 여기에 놓으세요</h3>
+            <p>Chat for Edu가 사진을 분석하여 답변해 드립니다.</p>
+          </div>
+        </div>
+      )}
       {/* 1. 사이드바 구성 */}
       <aside className={`sidebar ${isSidebarOpen ? 'expanded' : 'collapsed'}`}>
         {view === 'project' ? (
@@ -1235,16 +1461,82 @@ function App() {
               <div className="recent-history">
                 <div className="history-title">최근</div>
                 {historyItems.map((item, i) => (
-                  <button key={i} className="history-item" onClick={() => enterProject(item)}>
-                    <MessageSquare size={18} />
-                    <span>{item.title}</span>
-                  </button>
+                  <div key={item.id ?? i} className="history-item-wrapper">
+                    {editingHistoryId === item.id ? (
+                      <div className="history-item history-item-editing">
+                        <MessageSquare size={18} />
+                        <input
+                          autoFocus
+                          className="history-rename-input"
+                          value={editingHistoryTitle}
+                          onChange={(e) => setEditingHistoryTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleHistoryRenameSubmit(item.id);
+                            } else if (e.key === 'Escape') {
+                              e.preventDefault();
+                              setEditingHistoryId(null);
+                            }
+                          }}
+                          onBlur={() => handleHistoryRenameSubmit(item.id)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        <button className="history-item" onClick={() => enterProject(item)}>
+                          <MessageSquare size={18} />
+                          <span>{item.title}</span>
+                        </button>
+                        <button
+                          className={`history-item-menu-btn ${historyMenuOpenId === item.id ? 'active' : ''}`}
+                          onClick={(e) => handleHistoryMenuToggle(item, e)}
+                          aria-label="더보기"
+                        >
+                          <MoreVertical size={16} />
+                        </button>
+                      </>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
           </div>
         )}
       </aside>
+
+      {/* 사이드바 항목 메뉴 (포털: overflow에 잘리지 않도록 body 직속 렌더) */}
+      {historyMenuOpenId !== null && historyMenuPos && createPortal(
+        <div
+          className="history-action-menu"
+          style={{ position: 'fixed', top: historyMenuPos.top, right: historyMenuPos.right }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={(e) => {
+              const item = historyItems.find(it => it.id === historyMenuOpenId);
+              if (item) handleHistoryRenameStart(item, e);
+            }}
+          >
+            <Edit3 size={14} />
+            <span>이름 변경</span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const item = historyItems.find(it => it.id === historyMenuOpenId);
+              if (item) setDeleteHistoryItem(item);
+              setHistoryMenuOpenId(null);
+              setHistoryMenuPos(null);
+            }}
+          >
+            <Trash2 size={14} />
+            <span>삭제</span>
+          </button>
+        </div>,
+        document.body
+      )}
 
       {/* 2. 메인 컨텐츠 구성 */}
       <main className={`main-content view-${view} mode-${viewMode}`}>
@@ -1336,6 +1628,8 @@ function App() {
                   onUpdateMetadata={updateNodeMetadata}
                   onDeleteNode={() => setIsDeleteNodeModalOpen(true)}
                   onConnectEdge={handleConnectEdge}
+                  savedViewport={activeChat ? projectSessionMap[activeChat.id]?.viewport : undefined}
+                  onViewportChange={handleNodeViewportChange}
                 />
               </div>
             ) : viewMode === 'quiz' ? (
@@ -1598,7 +1892,7 @@ function App() {
                       <div className="q-type-badge-v3">{activeQuiz.data[currentQuizIndex].type.toUpperCase()}</div>
                       <div className="q-text-v3">
                         <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                          {activeQuiz.data[currentQuizIndex].question}
+                          {sanitizeMarkdown(activeQuiz.data[currentQuizIndex].question)}
                         </ReactMarkdown>
                       </div>
 
@@ -1625,7 +1919,7 @@ function App() {
                                 <span className="opt-num-v3">{i + 1}</span>
                                 <span className="opt-text-v3">
                                   <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                    {opt}
+                                    {sanitizeMarkdown(opt)}
                                   </ReactMarkdown>
                                 </span>
                               </button>
@@ -1716,7 +2010,7 @@ function App() {
                             </div>
                             <div className="res-q-text-v3">
                               <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                {q.question}
+                                {sanitizeMarkdown(q.question)}
                               </ReactMarkdown>
                             </div>
                             <div className="res-compare-v3">
@@ -1729,7 +2023,7 @@ function App() {
                                   <label>정답:</label>
                                   <div className="ans-val-v3">
                                     <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                      {q.answer}
+                                      {sanitizeMarkdown(q.answer)}
                                     </ReactMarkdown>
                                   </div>
                                 </div>
@@ -1740,7 +2034,7 @@ function App() {
                                 <div className="res-explanation-v3" style={{ marginBottom: '16px' }}>
                                   <label style={{ color: '#4285f4' }}>AI 피드백:</label>
                                   <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                    {quizFeedback[i].feedback}
+                                    {sanitizeMarkdown(quizFeedback[i].feedback)}
                                   </ReactMarkdown>
                                 </div>
                             )}
@@ -1748,7 +2042,7 @@ function App() {
                             <div className="res-explanation-v3">
                               <label>해설 / 모범 답안:</label>
                               <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                {q.explanation || q.answer}
+                                {sanitizeMarkdown(q.explanation || q.answer)}
                               </ReactMarkdown>
                             </div>
                           </div>
@@ -1826,7 +2120,12 @@ function App() {
                     <div className="node-content-body">
                       {selectedNode.photo_url && (
                         <div className="node-image-display">
-                          <img src={`http://localhost:5000${selectedNode.photo_url}`} alt="Q" />
+                          <img 
+                            src={`http://localhost:5000${selectedNode.photo_url}`} 
+                            alt="Q" 
+                            onClick={() => setEnlargedImage(`http://localhost:5000${selectedNode.photo_url}`)}
+                            style={{ cursor: 'zoom-in' }}
+                          />
                         </div>
                       )}
                       <div className="question-section">
@@ -1840,14 +2139,14 @@ function App() {
                             {isGenerating ? (
                               <div className="ai-loading-inline">
                                 <Loader2 size={18} className="spinning-icon" />
-                                <span>Gemini가 답변을 생성하고 있습니다...</span>
+                                <span>Chat for Edu가 답변을 생성하고 있습니다...</span>
                               </div>
                             ) : (
                               <ReactMarkdown
                                 remarkPlugins={[remarkMath]}
                                 rehypePlugins={[rehypeKatex]}
                               >
-                                {selectedNode.answer_text}
+                                {sanitizeMarkdown(selectedNode.answer_text)}
                               </ReactMarkdown>
                             )}
                           </div>
@@ -1862,7 +2161,7 @@ function App() {
                       <div className="ai-loading-full">
                         <Loader2 size={48} className="spinning-icon" color="#4285f4" />
                         <h3>지식을 구성하고 있습니다...</h3>
-                        <p>잠시만 기다려주세요. Gemini가 질문을 분석 중입니다.</p>
+                        <p>잠시만 기다려주세요. Chat for Edu가 질문을 분석 중입니다.</p>
                       </div>
                     ) : (
                       <>
@@ -2030,6 +2329,33 @@ function App() {
                 <button className="btn-secondary" onClick={() => setIsDeleteProjectModalOpen(false)}>아니오</button>
                 <button className="btn-danger" onClick={handleDeleteProject} style={{ backgroundColor: '#d96570', color: 'white' }}>네</button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* --- Sidebar History Item Delete Modal --- */}
+        {deleteHistoryItem && (
+          <div className="modal-overlay" onClick={() => setDeleteHistoryItem(null)}>
+            <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+              <h3>프로젝트 삭제</h3>
+              <p><strong>[{deleteHistoryItem.title}]</strong></p>
+              <p>이 프로젝트를 삭제하시겠습니까?</p>
+              <div className="modal-actions">
+                <button className="btn-secondary" onClick={() => setDeleteHistoryItem(null)}>취소</button>
+                <button className="btn-danger" onClick={handleHistoryDeleteConfirm} style={{ backgroundColor: '#d96570', color: 'white' }}>삭제</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* --- Image Modal (Enlarge) --- */}
+        {enlargedImage && (
+          <div className="image-modal-overlay" onClick={() => setEnlargedImage(null)}>
+            <div className="image-modal-content" onClick={(e) => e.stopPropagation()}>
+              <img src={enlargedImage} alt="Enlarged" className="enlarged-photo" />
+              <button className="modal-close-btn" onClick={() => setEnlargedImage(null)}>
+                <X size={28} />
+              </button>
             </div>
           </div>
         )}

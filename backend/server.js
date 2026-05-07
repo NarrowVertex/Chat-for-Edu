@@ -346,7 +346,8 @@ app.post('/api/chats', upload.single('photo'), async (req, res) => {
 응답 형식은 반드시 다음과 같이 작성하세요:
 [TITLE] 제목 내용
 [ANSWER] 답변 내용
-한글로 답변하세요.`;
+
+[중요] 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
 
     let parts = [prompt];
     if (req.file) {
@@ -559,7 +560,8 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
 응답 형식은 반드시 다음과 같이 작성하세요:
 [TITLE] 제목 내용
 [ANSWER] 답변 내용
-한글로 답변하세요.`;
+
+[중요] 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
 
       // 2. 히스토리와 현재 질문 결합
       let contents = [...history];
@@ -637,7 +639,8 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
 응답 형식은 반드시 다음과 같이 작성하세요:
 [TITLE] 제목 내용
 [ANSWER] 답변 내용
-한글로 답변하세요.`;
+
+[중요] 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
 
     let contents = [...history];
     let currentParts = [{ text: prompt }];
