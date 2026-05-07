@@ -8,11 +8,13 @@ const fs = require('fs');
 const multer = require('multer');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// Gemini API 초기화 (기존 사용하던 2.5 Flash 모델로 복구)
+// Gemini API 초기화 (사용자 요청으로 gemini-2.5-flash로 원복)
+const MODEL_NAME = "gemini-2.5-flash";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash",
+  model: MODEL_NAME,
 });
+console.log(`[Gemini Config] 현재 사용 중인 모델: ${MODEL_NAME}`);
 
 // 이미지 데이터를 Gemini API용 포맷으로 변환하는 함수
 function fileToGenerativePart(path, mimeType) {
@@ -78,7 +80,7 @@ async function initDB() {
     await db.execute(`
       CREATE TABLE IF NOT EXISTS Quizzes (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        chat_id INT,
+        chat_id INT NOT NULL,
         title VARCHAR(255),
         status VARCHAR(50) DEFAULT 'ready',
         config JSON,
@@ -90,15 +92,36 @@ async function initDB() {
     await db.execute(`
       CREATE TABLE IF NOT EXISTS Questions (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        quiz_id INT,
+        quiz_id INT NOT NULL,
         question_text TEXT,
         question_type VARCHAR(50),
         options JSON,
         correct_answer TEXT,
         explanation TEXT,
+        difficulty VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (quiz_id) REFERENCES Quizzes(id) ON DELETE CASCADE
       )
     `);
+
+    // [추가] 기존 테이블에 컬럼이 없을 경우를 대비한 자동 마이그레이션
+    try {
+      await db.execute('ALTER TABLE Questions ADD COLUMN difficulty VARCHAR(50) AFTER explanation');
+      console.log('[DB Migration] Questions 테이블에 difficulty 컬럼을 추가했습니다.');
+    } catch (err) {
+      if (err.code !== 'ER_DUP_COLUMN_NAME') {
+        console.error('[DB Migration] difficulty 추가 중 에러:', err.message);
+      }
+    }
+
+    try {
+      await db.execute('ALTER TABLE Questions ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER difficulty');
+      console.log('[DB Migration] Questions 테이블에 created_at 컬럼을 추가했습니다.');
+    } catch (err) {
+      if (err.code !== 'ER_DUP_COLUMN_NAME') {
+        console.error('[DB Migration] created_at 추가 중 에러:', err.message);
+      }
+    }
 
     // [추가] 서버 시작 시, 완료되지 못하고 'generating' 상태로 남은 유령 데이터 삭제
     const [cleanupResult] = await db.execute(`DELETE FROM Quizzes WHERE status = 'generating'`);
@@ -760,14 +783,16 @@ ${contextText}
 3. 계산 문제 포함 여부: ${calculationInstruction}
 4. 모든 문제는 제공된 [학습 내용]의 범위를 벗어나지 않으면서도 난이도 전략에 충실해야 합니다.
 5. 응답은 반드시 아래의 JSON 배열 형식으로만 작성하세요. 텍스트 설명은 포함하지 마세요.
+6. [중요] 모든 문자열 값 내에서 백슬래시(\)를 사용할 때는 반드시 이중 백슬래시(\\)로 작성하여 JSON 파싱 에러가 나지 않게 하세요. (예: \theta -> \\theta, \mathbf -> \\mathbf)
+7. 수학 기호나 수식은 가급적 텍스트로 표현하되, 꼭 필요하다면 반드시 이중 백슬래시를 사용하세요.
 
 [응답 형식 예시]
 [
   {
     "type": "ox",
-    "question": "질문 내용",
-    "answer": "O 또는 X",
-    "explanation": "해설 내용"
+    "question": "질문 내용 (예: $D_{KL}$은 항상 0 이상입니까?)",
+    "answer": "O",
+    "explanation": "해설 내용 (예: 항상 0 이상의 값을 가집니다.)"
   },
   {
     "type": "multiple",
@@ -797,6 +822,10 @@ ${contextText}
       const response_ai = await result_ai.response;
       let fullText = response_ai.text();
 
+      console.log("--- AI Raw Response ---");
+      console.log(fullText);
+      console.log("--- End Raw Response ---");
+
       // JSON 추출 및 정제
       let cleaned = fullText.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
       const jsonStartIndex = cleaned.indexOf('[');
@@ -804,18 +833,24 @@ ${contextText}
       if (jsonStartIndex === -1 || jsonEndIndex === 0) throw new Error('JSON 배열을 찾을 수 없습니다.');
       let jsonString = cleaned.substring(jsonStartIndex, jsonEndIndex);
 
-      // 특수 문자 및 줄바꿈 정밀 교정 (LaTeX 수식 대응 강화)
-      jsonString = jsonString.replace(/"((?:[^"\\]|\\.)*)"/gs, (match, inner) => {
-        // 1) 실제 줄바꿈을 \n 문자열로 변환
-        let fixed = inner.replace(/\n/g, '\\n');
-        // 2) 백슬래시 보정: JSON 표준 이스케이프가 아닌 \ 뒤의 문자는 \\로 변환
-        fixed = fixed.replace(/\\([^"\\\/bfnrtu])/g, '\\\\$1');
-        // 3) \u가 4자리 16진수가 아닌 경우 (LaTeX \underline 등) 대응
-        fixed = fixed.replace(/\\u(?![0-9a-fA-F]{4})/g, '\\\\u');
-        return `"${fixed}"`;
-      });
+      console.log("--- Cleaned JSON String ---");
+      console.log(jsonString);
+      console.log("--- End JSON String ---");
 
-      const quizData = JSON.parse(jsonString);
+      // [수정] 불안정한 수동 정규식 정제를 제거하고 바로 파싱 시도
+      // AI가 3.0 모델이므로 프롬프트 지시만으로도 충분히 깨끗한 JSON을 생성합니다.
+      let quizData;
+      try {
+        quizData = JSON.parse(jsonString);
+      } catch (e) {
+        console.error("Primary JSON Parse Failed, attempting fallback cleaning...");
+        // 파싱 실패 시에만 최소한의 안전 장치 가동 (줄바꿈 및 제어 문자 보정)
+        const secondaryCleaned = jsonString
+          .replace(/\n/g, "\\n")
+          .replace(/\r/g, "\\r")
+          .replace(/\t/g, "\\t");
+        quizData = JSON.parse(secondaryCleaned);
+      }
 
       // 개별 문제들 저장
       for (const q of quizData) {
