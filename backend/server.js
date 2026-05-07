@@ -8,7 +8,8 @@ const fs = require('fs');
 const multer = require('multer');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// Gemini API 초기화 (안정적인 1.5 Flash 모델 사용)
+// Gemini API 초기화 (사용자 요청으로 gemini-2.5-flash로 원복)
+const MODEL_NAME = "gemini-2.5-flash";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" });
 
@@ -20,6 +21,17 @@ function fileToGenerativePart(path, mimeType) {
       mimeType,
     },
   };
+}
+
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case '.png': return 'image/png';
+    case '.webp': return 'image/webp';
+    case '.heic': return 'image/heic';
+    case '.heif': return 'image/heif';
+    default: return 'image/jpeg';
+  }
 }
 
 // 트리 구조에서 상위 노드들을 추적하여 대화 히스토리를 구성하는 함수
@@ -58,6 +70,68 @@ async function getChatHistory(parentId) {
   // 루트부터 현재까지 올바른 시간 순서로 정렬
   return history.reverse();
 }
+
+// 데이터베이스 테이블 초기화
+async function initDB() {
+  try {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS Quizzes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        chat_id INT NOT NULL,
+        title VARCHAR(255),
+        status VARCHAR(50) DEFAULT 'ready',
+        config JSON,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (chat_id) REFERENCES Chats(id) ON DELETE CASCADE
+      )
+    `);
+
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS Questions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        quiz_id INT NOT NULL,
+        question_text TEXT,
+        question_type VARCHAR(50),
+        options JSON,
+        correct_answer TEXT,
+        explanation TEXT,
+        difficulty VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (quiz_id) REFERENCES Quizzes(id) ON DELETE CASCADE
+      )
+    `);
+
+    // [추가] 기존 테이블에 컬럼이 없을 경우를 대비한 자동 마이그레이션
+    try {
+      await db.execute('ALTER TABLE Questions ADD COLUMN difficulty VARCHAR(50) AFTER explanation');
+      console.log('[DB Migration] Questions 테이블에 difficulty 컬럼을 추가했습니다.');
+    } catch (err) {
+      if (err.code !== 'ER_DUP_COLUMN_NAME') {
+        console.error('[DB Migration] difficulty 추가 중 에러:', err.message);
+      }
+    }
+
+    try {
+      await db.execute('ALTER TABLE Questions ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER difficulty');
+      console.log('[DB Migration] Questions 테이블에 created_at 컬럼을 추가했습니다.');
+    } catch (err) {
+      if (err.code !== 'ER_DUP_COLUMN_NAME') {
+        console.error('[DB Migration] created_at 추가 중 에러:', err.message);
+      }
+    }
+
+    // [추가] 서버 시작 시, 완료되지 못하고 'generating' 상태로 남은 유령 데이터 삭제
+    const [cleanupResult] = await db.execute(`DELETE FROM Quizzes WHERE status = 'generating'`);
+    if (cleanupResult.affectedRows > 0) {
+      console.log(`[DB Cleanup] ${cleanupResult.affectedRows}개의 유령 퀴즈 데이터를 정리했습니다.`);
+    }
+
+    console.log('퀴즈 관련 테이블 및 데이터 정리 완료');
+  } catch (err) {
+    console.error('DB 초기화 에러:', err);
+  }
+}
+initDB();
 
 const app = express();
 app.use(cors());
@@ -292,7 +366,8 @@ app.post('/api/chats', upload.single('photo'), async (req, res) => {
 응답 형식은 반드시 다음과 같이 작성하세요:
 [TITLE] 제목 내용
 [ANSWER] 답변 내용
-한글로 답변하세요.`;
+
+[중요] 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
 
     let parts = [prompt];
     if (req.file) {
@@ -505,7 +580,8 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
 응답 형식은 반드시 다음과 같이 작성하세요:
 [TITLE] 제목 내용
 [ANSWER] 답변 내용
-한글로 답변하세요.`;
+
+[중요] 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
 
       // 2. 히스토리와 현재 질문 결합
       let contents = [...history];
@@ -555,7 +631,6 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
   }
 });
 
-
 // AI 답변 재생성 API
 app.put('/api/messages/:id/regenerate', async (req, res) => {
   const { id } = req.params;
@@ -584,7 +659,8 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
 응답 형식은 반드시 다음과 같이 작성하세요:
 [TITLE] 제목 내용
 [ANSWER] 답변 내용
-한글로 답변하세요.`;
+
+[중요] 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
 
     let contents = [...history];
     let currentParts = [{ text: prompt }];
@@ -593,7 +669,7 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
     if (msg.photo_url) {
       const photoPath = path.join(__dirname, msg.photo_url);
       if (fs.existsSync(photoPath)) {
-        currentParts.push(fileToGenerativePart(photoPath, "image/jpeg"));
+        currentParts.push(fileToGenerativePart(photoPath, getMimeType(photoPath)));
       }
     }
 
@@ -629,6 +705,267 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
 app.delete('/api/chats/:chatId', async (req, res) => {
   try {
     const chatId = req.params.chatId;
+    await db.execute('DELETE FROM Chats WHERE id = ?', [chatId]);
+    res.json({ message: "프로젝트가 삭제되었습니다." });
+  } catch (error) {
+    console.error("Delete Chat Error:", error);
+    res.status(500).json({ error: "프로젝트 삭제에 실패했습니다." });
+  }
+});
+
+// --- 퀴즈 관련 API ---
+
+// --- 퀴즈 관련 API ---
+
+// 퀴즈 생성 API
+app.post('/api/quiz/generate', async (req, res) => {
+  let quizId; // 에러 핸들링을 위해 스코프 상단에 선언
+  try {
+    const { chatId, selectedNodeIds, config } = req.body;
+    const { types, difficulty, includeCalculation } = config;
+
+    if (!selectedNodeIds || selectedNodeIds.length === 0) {
+      return res.status(400).json({ error: "출제 범위를 선택해주세요." });
+    }
+
+    // 1. 선택된 노드들의 텍스트 데이터 수집
+    const placeholders = selectedNodeIds.map(() => '?').join(',');
+    const [nodes] = await db.execute(
+      `SELECT question_text, answer_text, node_title FROM Messages WHERE id IN (${placeholders})`,
+      selectedNodeIds
+    );
+
+    if (nodes.length === 0) {
+      return res.status(404).json({ error: "학습 데이터를 찾을 수 없습니다." });
+    }
+
+    // 2. Quiz 마스터 레코드 생성 (생성 중 상태)
+    const [quizResult] = await db.execute(
+      `INSERT INTO Quizzes (chat_id, status, config) VALUES (?, 'generating', ?)`,
+      [chatId, JSON.stringify(config)]
+    );
+    quizId = quizResult.insertId;
+
+    try {
+      const contextText = nodes.map(n => 
+        `제목: ${n.node_title}\n질문: ${n.question_text}\n내용: ${n.answer_text}`
+      ).join('\n\n---\n\n');
+
+      // 난이도 및 계산 로직 구성
+      let difficultyInstruction = "";
+      if (difficulty === '하') {
+        difficultyInstruction = "제공된 학습 내용에 명시된 사실을 그대로 확인하는 수준의 문제를 출제하세요.";
+      } else if (difficulty === '중') {
+        difficultyInstruction = "제공된 학습 내용을 실제 상황이나 새로운 사례에 적용하여 풀이해야 하는 응용 문제를 출제하세요.";
+      } else if (difficulty === '상') {
+        difficultyInstruction = "제공된 학습 내용을 기반으로 하되, 그 이상의 추론이나 관련 심화 지식을 연계하여 비판적 사고를 요구하는 확장형 문제를 출제하세요.";
+      }
+
+      let calculationInstruction = includeCalculation 
+        ? "주관식(short)과 서술형(descriptive) 문제는 반드시 제공된 수식이나 원리를 활용하여 직접 계산하거나 수치를 도출해야 하는 문제로 구성하세요."
+        : "개념 설명 위주의 문제를 구성하세요.";
+
+      const prompt = `당신은 에듀테크 전문 출제 위원입니다. 아래 제공된 [학습 내용]을 바탕으로 학생을 위한 맞춤형 퀴즈를 생성하세요.
+
+[학습 내용]
+${contextText}
+
+[출제 요구사항]
+1. 문제 유형 및 개수:
+   - OX 문제: ${types.ox}개
+   - 객관식: ${types.multiple}개
+   - 주관식: ${types.short}개
+   - 서술형: ${types.descriptive}개
+2. 난이도 전략 [${difficulty}]: ${difficultyInstruction}
+3. 계산 문제 포함 여부: ${calculationInstruction}
+4. 모든 문제는 제공된 [학습 내용]의 범위를 벗어나지 않으면서도 난이도 전략에 충실해야 합니다.
+5. 응답은 반드시 아래의 JSON 배열 형식으로만 작성하세요. 텍스트 설명은 포함하지 마세요.
+6. [중요] 모든 문자열 값 내에서 백슬래시(\)를 사용할 때는 반드시 이중 백슬래시(\\)로 작성하여 JSON 파싱 에러가 나지 않게 하세요. (예: \theta -> \\theta, \mathbf -> \\mathbf)
+7. 수학 기호나 수식은 가급적 텍스트로 표현하되, 꼭 필요하다면 반드시 이중 백슬래시를 사용하세요.
+
+[응답 형식 예시]
+[
+  {
+    "type": "ox",
+    "question": "질문 내용 (예: $D_{KL}$은 항상 0 이상입니까?)",
+    "answer": "O",
+    "explanation": "해설 내용 (예: 항상 0 이상의 값을 가집니다.)"
+  },
+  {
+    "type": "multiple",
+    "question": "질문 내용",
+    "options": ["보기1", "보기2", "보기3", "보기4"],
+    "answer": "정답 내용(보기 중 하나)",
+    "explanation": "해설 내용"
+  },
+  {
+    "type": "short",
+    "question": "질문 내용",
+    "answer": "단답형 정답",
+    "explanation": "해설 내용"
+  },
+  {
+    "type": "descriptive",
+    "question": "질문 내용",
+    "answer": "모범 답안 핵심 키워드 또는 문장",
+    "explanation": "상세 채점 기준 및 해설"
+  }
+]
+
+한글로 작성하세요.`;
+
+      // 3. Gemini 호출
+      const result_ai = await model.generateContent(prompt);
+      const response_ai = await result_ai.response;
+      let fullText = response_ai.text();
+
+      console.log("--- AI Raw Response ---");
+      console.log(fullText);
+      console.log("--- End Raw Response ---");
+
+      // JSON 추출 및 정제
+      let cleaned = fullText.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+      const jsonStartIndex = cleaned.indexOf('[');
+      const jsonEndIndex = cleaned.lastIndexOf(']') + 1;
+      if (jsonStartIndex === -1 || jsonEndIndex === 0) throw new Error('JSON 배열을 찾을 수 없습니다.');
+      let jsonString = cleaned.substring(jsonStartIndex, jsonEndIndex);
+
+      console.log("--- Cleaned JSON String ---");
+      console.log(jsonString);
+      console.log("--- End JSON String ---");
+
+      // [수정] 불안정한 수동 정규식 정제를 제거하고 바로 파싱 시도
+      // AI가 3.0 모델이므로 프롬프트 지시만으로도 충분히 깨끗한 JSON을 생성합니다.
+      let quizData;
+      try {
+        quizData = JSON.parse(jsonString);
+      } catch (e) {
+        console.error("Primary JSON Parse Failed, attempting fallback cleaning...");
+        // 파싱 실패 시에만 최소한의 안전 장치 가동 (줄바꿈 및 제어 문자 보정)
+        const secondaryCleaned = jsonString
+          .replace(/\n/g, "\\n")
+          .replace(/\r/g, "\\r")
+          .replace(/\t/g, "\\t");
+        quizData = JSON.parse(secondaryCleaned);
+      }
+
+      // 개별 문제들 저장
+      for (const q of quizData) {
+        await db.execute(
+          'INSERT INTO Questions (quiz_id, question_text, question_type, options, correct_answer, explanation, difficulty) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [quizId, q.question, q.type, q.options ? JSON.stringify(q.options) : null, q.answer, q.explanation, difficulty]
+        );
+      }
+
+      // 상태 완료로 변경
+      await db.execute('UPDATE Quizzes SET status = ? WHERE id = ?', ['completed', quizId]);
+
+      res.json({ quizId, quizData });
+
+    } catch (innerErr) {
+      console.error("Quiz Logic Error:", innerErr);
+      // 실패 시 DB 레코드 즉시 삭제 (유령 데이터 방지)
+      if (quizId) {
+        await db.execute('DELETE FROM Quizzes WHERE id = ?', [quizId]);
+      }
+      res.status(500).json({ error: innerErr.message || "퀴즈 생성 중 오류가 발생했습니다." });
+    }
+
+  } catch (error) {
+    console.error("Outer Quiz Error:", error);
+    if (quizId) {
+      await db.execute('DELETE FROM Quizzes WHERE id = ?', [quizId]);
+    }
+    res.status(500).json({ 
+      error: error.status === 429 
+        ? "AI 사용량 제한이 초과되었습니다. 잠시 후 다시 시도해 주세요." 
+        : "퀴즈 생성에 실패했습니다." 
+    });
+  }
+});
+
+// 퀴즈 목록 조회
+app.get('/api/chats/:chatId/quizzes', async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      'SELECT id, status, config, created_at FROM Quizzes WHERE chat_id = ? ORDER BY created_at DESC',
+      [req.params.chatId]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error("Fetch Quizzes Error:", err);
+    res.status(500).json({ error: "퀴즈 목록을 불러오지 못했습니다." });
+  }
+});
+
+// 특정 퀴즈의 문제들 조회
+app.get('/api/quizzes/:quizId/questions', async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      'SELECT id, question_type, question_text, options, correct_answer, explanation, difficulty FROM Questions WHERE quiz_id = ? ORDER BY id ASC',
+      [req.params.quizId]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error("Fetch Questions Error:", err);
+    res.status(500).json({ error: "문제를 불러오지 못했습니다." });
+  }
+});
+
+// 서술형 채점 API
+app.post('/api/quiz/grade', async (req, res) => {
+  try {
+    const { question_text, correct_answer, explanation, user_answer } = req.body;
+    if (!user_answer) return res.json({ score: 0, feedback: "답안이 비어있습니다." });
+
+    const prompt = `당신은 채점자입니다. 다음 문제와 모범 답안을 기준으로 사용자의 답안을 채점하세요.
+    문제: ${question_text}
+    모범 답안 및 기준: ${correct_answer} (해설: ${explanation})
+    사용자 제출 답안: ${user_answer}
+
+    위 내용을 종합적으로 판단하여 0점에서 100점 사이의 점수를 매기고, 간략한 피드백(어느 부분이 맞았고 틀렸는지 1~2문장)을 작성하세요.
+    응답은 아래 JSON 형식으로만 반환하세요.
+    {
+      "score": 점수숫자,
+      "feedback": "피드백내용"
+    }`;
+
+    const result_ai = await model.generateContent(prompt);
+    let fullText = (await result_ai.response).text().replace(/```json|```/g, '').trim();
+    res.json(JSON.parse(fullText));
+  } catch (err) {
+    console.error("Grade Quiz Error:", err);
+    res.status(500).json({ error: "채점 중 오류가 발생했습니다." });
+  }
+});
+
+// 퀴즈 삭제
+app.delete('/api/quizzes/:quizId', async (req, res) => {
+  try {
+    await db.execute('DELETE FROM Quizzes WHERE id = ?', [req.params.quizId]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "삭제 실패" });
+  }
+});
+
+// 퀴즈 제목 수정
+app.put('/api/quizzes/:quizId/title', async (req, res) => {
+  try {
+    const { title } = req.body;
+    await db.execute('UPDATE Quizzes SET title = ? WHERE id = ?', [title, req.params.quizId]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "수정 실패" });
+  }
+});
+
+// 프로젝트(채팅방) 삭제 API 복구
+app.delete('/api/chats/:chatId', async (req, res) => {
+  try {
+    const chatId = req.params.chatId;
+    // Chats 테이블 삭제 시 ON DELETE CASCADE 설정으로 인해 
+    // Messages(노드)와 Quizzes(퀴즈) 테이블의 관련 데이터도 자동으로 삭제됩니다.
     await db.execute('DELETE FROM Chats WHERE id = ?', [chatId]);
     res.json({ message: "프로젝트가 삭제되었습니다." });
   } catch (error) {

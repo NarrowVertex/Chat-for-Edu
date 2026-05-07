@@ -29,12 +29,7 @@ async function migrate() {
 
         console.log('모든 마이그레이션이 성공적으로 완료되었습니다.');
     } catch (error) {
-        // 이미 컬럼이 존재하는 경우 등 에러 처리
-        if (error.code === 'ER_DUP_COLUMN_NAME') {
-            console.warn('이미 마이그레이션이 적용되어 있습니다.');
-        } else {
-            console.error('마이그레이션 도중 에러 발생:', error);
-        }
+        console.error('마이그레이션 도중 에러 발생:', error);
     } finally {
         await connection.end();
     }

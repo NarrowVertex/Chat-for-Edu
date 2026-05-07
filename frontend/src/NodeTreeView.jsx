@@ -2,7 +2,6 @@ import { useMemo, useEffect, useState, useRef } from 'react';
 import {
   ReactFlow,
   Background,
-  Controls,
   MiniMap,
   useNodesState,
   useEdgesState,
@@ -394,7 +393,7 @@ const buildFlowData = (nodes, selectedNode, onNodeClick, onDoubleClickNode, onUp
 };
 
 /* ─── 메인 컴포넌트 ─── */
-export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubleClickNode, onUpdateMetadata, onDeleteNode, onConnectEdge }) {
+export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubleClickNode, onUpdateMetadata, onDeleteNode, onConnectEdge, savedViewport, onViewportChange }) {
   const { flowNodes: rawNodes, flowEdges: rawEdges } = useMemo(
     () => buildFlowData(nodes, selectedNode, onNodeClick, onDoubleClickNode, onUpdateMetadata, onDeleteNode),
     [nodes, selectedNode, onNodeClick, onDoubleClickNode, onUpdateMetadata, onDeleteNode]
@@ -566,22 +565,19 @@ export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubl
         onConnect={(params) => {
           if (onConnectEdge) onConnectEdge(params);
         }}
+        onMoveEnd={(_, viewport) => {
+          if (onViewportChange) onViewportChange(viewport);
+        }}
         nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.25 }}
+        {...(savedViewport
+          ? { defaultViewport: savedViewport }
+          : { fitView: true, fitViewOptions: { padding: 0.25 } })}
         minZoom={0.15}
         maxZoom={2.5}
         style={{ background: '#1a1c22' }}
         proOptions={{ hideAttribution: true }}
       >
         <Background color="rgba(255,255,255,0.03)" gap={28} />
-        <Controls
-          style={{
-            background: 'rgba(30,34,42,0.9)',
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: '8px',
-          }}
-        />
         <MiniMap
           style={{
             background: 'rgba(26,28,34,0.95)',
