@@ -10,7 +10,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // Gemini API 초기화 (안정적인 1.5 Flash 모델 사용)
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" });
 
 // 이미지 데이터를 Gemini API용 포맷으로 변환하는 함수
 function fileToGenerativePart(path, mimeType) {
@@ -181,7 +181,7 @@ async function updateMainNodeLabels(chat_id) {
           // 관계 판별 (핸들 로직)
           const isBottom = String(child.parent_id) === String(parent.id);
           let type, phase, prefix;
-          
+
           const lastSegmentRegex = /([MSB])(\d+)-(\d+)(\(\d+\))?$/;
           const match = parent.label.match(lastSegmentRegex);
           const [full, pType, pPhase, pInstance, pFamilyId] = match || ["", "M", "1", "1", ""];
@@ -198,14 +198,14 @@ async function updateMainNodeLabels(chat_id) {
             phase = parseInt(pPhase) + 1;
             prefix = pPrefix;
           }
-          
-          allChildren.push({ 
-            node: child, 
-            parentLabel: parent.label, 
-            prefix, 
-            type, 
-            phase, 
-            familyId: pFamilyId || "" 
+
+          allChildren.push({
+            node: child,
+            parentLabel: parent.label,
+            prefix,
+            type,
+            phase,
+            familyId: pFamilyId || ""
           });
         }
       }
@@ -230,7 +230,7 @@ async function updateMainNodeLabels(chat_id) {
         for (let i = 0; i < groupNodes.length; i++) {
           const item = groupNodes[i];
           const newLabel = `${item.prefix}${item.type}${item.phase}-${i + 1}${item.familyId}`;
-          
+
           // DB 업데이트 (parent_id는 이미 관계 판별 시 사용했으므로 라벨만 업데이트)
           await db.execute('UPDATE Messages SET node_label = ? WHERE id = ?', [newLabel, item.node.id]);
           nextQueue.push({ id: item.node.id, label: newLabel });
@@ -330,10 +330,10 @@ app.post('/api/chats', upload.single('photo'), async (req, res) => {
     res.status(201).json({ chatId, title: aiTitle });
   } catch (error) {
     console.error("Create Chat Error:", error);
-    res.status(500).json({ 
-      error: error.status === 429 
-        ? "AI 사용량 제한이 초과되었습니다. 약 30초 후 다시 시도해 주세요." 
-        : "채팅 프로젝트 생성에 실패했습니다." 
+    res.status(500).json({
+      error: error.status === 429
+        ? "AI 사용량 제한이 초과되었습니다. 약 30초 후 다시 시도해 주세요."
+        : "채팅 프로젝트 생성에 실패했습니다."
     });
   }
 });
@@ -370,11 +370,11 @@ app.patch('/api/nodes/:nodeId', async (req, res) => {
     if (is_favorite !== undefined) { fields.push('is_favorite = ?'); values.push(is_favorite); }
     if (position_x !== undefined) { fields.push('position_x = ?'); values.push(position_x); }
     if (position_y !== undefined) { fields.push('position_y = ?'); values.push(position_y); }
-    
-    if (reference_node_id !== undefined) { 
-      fields.push('reference_node_id = ?'); 
-      values.push(reference_node_id); 
-      
+
+    if (reference_node_id !== undefined) {
+      fields.push('reference_node_id = ?');
+      values.push(reference_node_id);
+
       if (reference_node_id === null) {
         fields.push('parent_id = NULL');
       }
@@ -402,14 +402,14 @@ app.patch('/api/nodes/:nodeId', async (req, res) => {
 app.post('/api/nodes/connect', async (req, res) => {
   try {
     const { source_id, target_id, connection_type } = req.body;
-    
+
     const [sourceRows] = await db.execute('SELECT * FROM Messages WHERE id = ?', [source_id]);
     const [targetRows] = await db.execute('SELECT * FROM Messages WHERE id = ?', [target_id]);
-    
+
     if (sourceRows.length === 0 || targetRows.length === 0) {
       return res.status(404).json({ error: "노드를 찾을 수 없습니다." });
     }
-    
+
     const sourceNode = sourceRows[0];
     const targetNode = targetRows[0];
 
@@ -417,41 +417,41 @@ app.post('/api/nodes/connect', async (req, res) => {
     if (targetNode.reference_node_id !== null) {
       return res.status(400).json({ error: "이미 연결된 노드입니다. 기존 연결을 먼저 끊어주세요." });
     }
-    
+
     const [allNodes] = await db.execute('SELECT * FROM Messages WHERE chat_id = ?', [sourceNode.chat_id]);
-    
+
     // 신규 라벨 결정 (Rightmost Segment 규칙 적용)
     let newLabel = '';
     const pLabel = sourceNode.node_label;
-    
+
     if (connection_type === 'child') {
       const prefix = `${pLabel}-S1-`;
-      const sameLevelNodes = allNodes.filter(n => 
-        n.reference_node_id === source_id && 
+      const sameLevelNodes = allNodes.filter(n =>
+        n.reference_node_id === source_id &&
         n.node_label.startsWith(prefix)
       );
       newLabel = `${prefix}${sameLevelNodes.length + 1}`;
     } else {
       const lastSegmentRegex = /([MSB])(\d+)-(\d+)(\(\d+\))?$/;
       const match = pLabel.match(lastSegmentRegex);
-      
+
       if (match) {
         const [full, type, phase, instance, familyId] = match;
         const prefix = pLabel.substring(0, pLabel.length - full.length);
         const newPhase = parseInt(phase) + 1;
         const targetBase = `${prefix}${type}${newPhase}-`;
-        
-        const existingCount = allNodes.filter(n => 
-          n.node_label.startsWith(targetBase) && 
+
+        const existingCount = allNodes.filter(n =>
+          n.node_label.startsWith(targetBase) &&
           (familyId ? n.node_label.endsWith(familyId) : !n.node_label.includes('('))
         ).length;
-        
+
         newLabel = `${targetBase}${existingCount + 1}${familyId || ''}`;
       } else {
         newLabel = `${pLabel}-R1`;
       }
     }
-    
+
     // 1. 타겟 노드의 기준 노드 및 부모 ID 업데이트
     let updateParentId = connection_type === 'child' ? source_id : sourceNode.parent_id;
 
@@ -509,14 +509,14 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
 
       // 2. 히스토리와 현재 질문 결합
       let contents = [...history];
-      
+
       let currentPart = { text: prompt };
       let currentParts = [currentPart];
-      
+
       if (req.file) {
         currentParts.push(fileToGenerativePart(req.file.path, req.file.mimetype));
       }
-      
+
       contents.push({
         role: "user",
         parts: currentParts
@@ -547,10 +547,10 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
     res.status(201).json({ id: result.insertId, node_title: aiTitle });
   } catch (error) {
     console.error("Add Node Error:", error);
-    res.status(500).json({ 
-      error: error.status === 429 
-        ? "AI 사용량 제한이 초과되었습니다. 잠시 후 다시 시도해 주세요." 
-        : "신규 노드 생성에 실패했습니다." 
+    res.status(500).json({
+      error: error.status === 429
+        ? "AI 사용량 제한이 초과되었습니다. 잠시 후 다시 시도해 주세요."
+        : "신규 노드 생성에 실패했습니다."
     });
   }
 });
@@ -563,12 +563,12 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
     // 1. 기존 메시지 정보 조회 (질문 텍스트 및 부모 ID 확보)
     const [messages] = await db.execute('SELECT * FROM Messages WHERE id = ?', [id]);
     if (messages.length === 0) return res.status(404).json({ error: "Message not found" });
-    
+
     const msg = messages[0];
     const text_content = msg.question_text || "이전 질문 내용을 불러올 수 없습니다.";
     const node_label = msg.node_label;
     const parent_id = msg.parent_id;
-    
+
     // 2. 이전 대화 내역(히스토리) 가져오기
     const history = await getChatHistory(parent_id);
 
@@ -652,25 +652,10 @@ app.delete('/api/nodes/:nodeId', async (req, res) => {
 
     const { chat_id } = targetNode;
 
-    const getAllDescendantIds = async (id) => {
-      let ids = [id];
-      const [children] = await db.execute('SELECT id FROM Messages WHERE reference_node_id = ?', [id]);
-      for (const child of children) {
-        const descendantIds = await getAllDescendantIds(child.id);
-        ids = ids.concat(descendantIds);
-      }
-      return ids;
-    };
-
-    const allIdsToDelete = await getAllDescendantIds(nodeId);
-    
-    if (allIdsToDelete.length > 0) {
-      const placeholders = allIdsToDelete.map(() => '?').join(',');
-      await db.execute(`DELETE FROM Messages WHERE id IN (${placeholders})`, allIdsToDelete);
-    }
+    await db.execute('DELETE FROM Messages WHERE id = ?', [nodeId]);
 
     await updateMainNodeLabels(chat_id);
-    res.json({ success: true, deletedCount: allIdsToDelete.length });
+    res.json({ success: true });
   } catch (err) {
     console.error('Delete Node Error:', err);
     res.status(500).json({ error: `삭제 실패: ${err.message}` });
