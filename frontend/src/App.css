@@ -498,8 +498,8 @@ body {
 
 .input-area-wrapper {
   width: 100%;
-  max-width: 800px;      /* 이전과 동일하게 가로 폭 제한 추가 */
-  margin: 0 auto;       /* 중앙 정렬 */
+  /* max-width: 800px 제거 (자식 요소에서 제한) */
+  /* margin: 0 auto 제거 */
   padding: 0 20px 20px 20px;
   z-index: 5;
   background: transparent;
@@ -508,6 +508,12 @@ body {
   align-items: center;
   gap: 12px;
   position: relative;
+  transition: padding-right 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.input-area-wrapper.panel-open {
+  padding-right: 680px; /* 우측 패널(450px) + 미니맵(약 200px) + 여유 공간 확보 */
+  /* padding-right를 통해 미니맵 왼쪽 공간에서 완벽히 중앙 정렬되도록 함 */
 }
 
 .input-area-wrapper > * {
@@ -516,6 +522,7 @@ body {
 
 .input-container {
   width: 100%;
+  max-width: 800px; /* 여기서 최대 폭 제한 */
   background: rgba(30, 34, 42, 0.4);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -527,6 +534,10 @@ body {
   gap: 8px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.input-area-wrapper.panel-open .input-container {
+  max-width: 650px; /* 패널 열렸을 때 크기 축소 */
 }
 
 .input-container:focus-within {
@@ -1190,6 +1201,7 @@ body {
 }
 
 .node-tag {
+  display: inline-block; /* 부모 너비만큼 늘어나지 않고 글자 크기에 맞춤 */
   font-size: 10px;
   font-weight: 800;
   padding: 2px 8px;
@@ -2833,3 +2845,258 @@ body {
   color: #888;
   font-size: 16px;
 }
+
+/* --- Node Right Panel --- */
+.node-view-split {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.node-graph-area {
+  flex: 1;
+  position: relative;
+  height: 100%;
+  min-width: 0;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.node-right-panel {
+  width: 450px;
+  background: rgba(20, 22, 28, 0.95);
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+  animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 40;
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.panel-header {
+  padding: 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.panel-header h3 {
+  margin: 12px 0 0 0;
+  font-size: 20px;
+  color: #fff;
+  line-height: 1.4;
+}
+
+.editable-title-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.edit-title-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  margin-top: 12px;
+}
+
+.edit-title-btn:hover {
+  color: #4285f4;
+  background: rgba(66, 133, 244, 0.1);
+}
+
+.title-edit-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.title-edit-input {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid #4285f4;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 6px;
+  outline: none;
+  width: 100%;
+  max-width: 300px;
+}
+
+.title-edit-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.title-edit-actions button {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.title-edit-actions button:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.panel-close-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.panel-close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.panel-scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.panel-scroll-area::-webkit-scrollbar {
+  width: 6px;
+}
+.panel-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+.panel-scroll-area::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+.panel-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Chat-like bubbles for Right Panel */
+.panel-message {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.panel-message.user {
+  align-items: flex-end;
+}
+
+.panel-message.ai {
+  align-items: flex-start;
+}
+
+.panel-message-label {
+  font-size: 12px;
+  color: #888;
+  padding: 0 4px;
+}
+
+.panel-bubble {
+  padding: 16px 20px;
+  border-radius: 20px;
+  max-width: 95%;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.panel-message.user .panel-bubble {
+  background: #4285f4;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.panel-message.ai .panel-bubble {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e3e3e3;
+  border-bottom-left-radius: 4px;
+}
+
+/* --- Drawing Tools Styles --- */
+.drawing-toolbar-wrapper {
+  display: flex;
+  position: relative;
+  align-items: center;
+  margin-bottom: -1px; /* 입력창과 밀착 */
+  z-index: 10;
+}
+
+.drawing-tools-bar {
+  background: rgba(30, 34, 42, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-bottom: none;
+  border-radius: 20px 20px 0 0;
+  padding: 8px 16px;
+  display: flex;
+  gap: 12px;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.tool-btn {
+  background: transparent;
+  border: none;
+  color: #a0aab5;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tool-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.tool-btn.active {
+  background: rgba(66, 133, 244, 0.2);
+  color: #4285f4;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.tool-divider {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 6px 0;
+}
+

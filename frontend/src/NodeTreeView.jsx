@@ -6,17 +6,140 @@ import {
   useNodesState,
   useEdgesState,
   Position,
-  Handle
+  Handle,
+  useViewport,
+  useReactFlow
 } from '@xyflow/react';
+
 import '@xyflow/react/dist/style.css';
 
 const NODE_WIDTH = 340;
 const NODE_HEIGHT = 120;
 
+/* ─── 그리기 캔버스 레이어 ─── */
+const DrawingLayer = ({ isDrawingMode, drawingTool, penColor, highlighterColor, drawings, setDrawings, onSaveDrawings }) => {
+  const { screenToFlowPosition } = useReactFlow();
+  const { x, y, zoom } = useViewport();
+  const [activePath, setActivePath] = useState(null);
+  const svgRef = useRef(null);
+
+  const handlePointerDown = (e) => {
+    if (!isDrawingMode || drawingTool === 'eraser') return;
+    const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    setActivePath([position]);
+    e.target.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e) => {
+    if (!activePath) return;
+    const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    setActivePath(prev => [...prev, position]);
+  };
+
+  const handlePointerUp = (e) => {
+    if (!activePath) return;
+    e.target.releasePointerCapture(e.pointerId);
+    if (activePath.length > 1) {
+      const newStroke = {
+        id: Date.now().toString(),
+        tool: drawingTool,
+        color: drawingTool === 'highlighter' ? highlighterColor : penColor,
+        path: activePath
+      };
+      const newDrawings = [...drawings, newStroke];
+      setDrawings(newDrawings);
+      onSaveDrawings(newDrawings);
+    }
+    setActivePath(null);
+  };
+
+  const handleErase = (e, strokeId) => {
+    if (isDrawingMode && drawingTool === 'eraser' && (e.buttons === 1 || e.type === 'pointerdown')) {
+      const newDrawings = drawings.filter(d => d.id !== strokeId);
+      setDrawings(newDrawings);
+      onSaveDrawings(newDrawings);
+    }
+  };
+
+  const pointsToPath = (points) => {
+    if (!points || points.length === 0) return '';
+    return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+  };
+
+  const getCursorStyle = () => {
+    if (!isDrawingMode) return 'default';
+    if (drawingTool === 'eraser') {
+      return `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect x="4" y="4" width="16" height="16" fill="white" stroke="black" stroke-width="2"/></svg>') 12 12, crosshair`;
+    }
+    if (drawingTool === 'highlighter') {
+      return `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="12" cy="12" r="9" fill="${encodeURIComponent(highlighterColor)}" opacity="0.4"/></svg>') 12 12, auto`;
+    }
+    return `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="4" fill="${encodeURIComponent(penColor)}"/></svg>') 8 8, auto`;
+  };
+
+  return (
+    <div 
+      style={{
+        position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+        zIndex: isDrawingMode ? 100 : 0,
+        pointerEvents: isDrawingMode ? 'auto' : 'none',
+        cursor: getCursorStyle()
+      }}
+    >
+      <svg 
+        ref={svgRef}
+        width="100%" 
+        height="100%" 
+        style={{ position: 'absolute', top: 0, left: 0 }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+      >
+        <g transform={`translate(${x}, ${y}) scale(${zoom})`}>
+          {drawings.map(d => (
+            <path
+              key={d.id}
+              d={pointsToPath(d.path)}
+              stroke={d.color || (d.tool === 'highlighter' ? 'rgba(255, 255, 0, 0.4)' : '#ffffff')}
+              strokeOpacity={d.tool === 'highlighter' && d.color ? 0.4 : 1}
+              strokeWidth={d.tool === 'highlighter' ? 18 : 3}
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              onPointerEnter={(e) => handleErase(e, d.id)}
+              onPointerDown={(e) => handleErase(e, d.id)}
+              style={{ 
+                pointerEvents: isDrawingMode && drawingTool === 'eraser' ? 'stroke' : 'none', 
+                cursor: isDrawingMode && drawingTool === 'eraser' ? getCursorStyle() : 'default' 
+              }}
+            />
+          ))}
+          {activePath && (
+            <path
+              d={pointsToPath(activePath)}
+              stroke={drawingTool === 'highlighter' ? highlighterColor : penColor}
+              strokeOpacity={drawingTool === 'highlighter' ? 0.4 : 1}
+              strokeWidth={drawingTool === 'highlighter' ? 18 : 3}
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ pointerEvents: 'none' }}
+            />
+          )}
+        </g>
+      </svg>
+    </div>
+  );
+};
+
 /* ─── 커스텀 노드 카드 ─── */
 const NodeCard = ({ data, id }) => {
   const { label, title, score, isFavorite, isSelected, globalIndex, onUpdate } = data;
   const [isHovered, setIsHovered] = useState(false);
+
+  // 노드 타입별 테마 색상 정의
+  const themeColor = label.startsWith('B') ? '#4ea8de' : label.includes('-S') ? '#ffd700' : '#ff4757';
 
   return (
     <div
@@ -25,117 +148,239 @@ const NodeCard = ({ data, id }) => {
       style={{
         width: NODE_WIDTH,
         height: NODE_HEIGHT,
-        background: 'rgba(25, 28, 35, 0.75)',
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
-        border: `1px solid ${isSelected ? 'rgba(66, 133, 244, 0.8)' : 'rgba(255, 255, 255, 0.1)'}`,
-        borderRadius: '16px',
+        background: 'rgba(25, 28, 35, 0.8)',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        border: `1.5px solid ${isSelected ? 'rgba(66, 133, 244, 0.8)' : 'rgba(255, 255, 255, 0.12)'}`,
+        borderRadius: '24px',
         position: 'relative',
         cursor: 'pointer',
         boxShadow: isSelected 
-          ? '0 0 24px rgba(66, 133, 244, 0.4), inset 0 0 12px rgba(66, 133, 244, 0.1)' 
-          : '0 8px 32px rgba(0, 0, 0, 0.4)',
+          ? '0 0 30px rgba(66, 133, 244, 0.3), inset 0 0 15px rgba(66, 133, 244, 0.05)' 
+          : '0 12px 40px rgba(0, 0, 0, 0.4)',
         display: 'flex',
         flexDirection: 'column',
         boxSizing: 'border-box',
-        padding: '20px',
+        padding: '18px 12px',
         color: '#f3f4f6',
         transition: 'all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)',
-        transform: isSelected ? 'translateY(-2px)' : 'none',
+        transform: isSelected ? 'translateY(-4px)' : 'none',
       }}
       onMouseEnter={(e) => {
         setIsHovered(true);
         if (!isSelected) {
-          e.currentTarget.style.transform = 'translateY(-2px)';
-          e.currentTarget.style.boxShadow = '0 12px 40px rgba(0, 0, 0, 0.5)';
-          e.currentTarget.style.border = '1px solid rgba(255, 255, 255, 0.25)';
+          e.currentTarget.style.transform = 'translateY(-4px)';
+          e.currentTarget.style.boxShadow = '0 16px 48px rgba(0, 0, 0, 0.5)';
+          e.currentTarget.style.border = '1.5px solid rgba(255, 255, 255, 0.25)';
         }
       }}
       onMouseLeave={(e) => {
         setIsHovered(false);
         if (!isSelected) {
           e.currentTarget.style.transform = 'none';
-          e.currentTarget.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.4)';
-          e.currentTarget.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+          e.currentTarget.style.boxShadow = '0 12px 40px rgba(0, 0, 0, 0.4)';
+          e.currentTarget.style.border = '1.5px solid rgba(255, 255, 255, 0.12)';
         }
       }}
     >
-      {/* Target Handles (화면엔 안 보이지만 선 연결의 도착점으로 필수) */}
+      {/* Target Handles */}
       <Handle type="target" position={Position.Top} id="top" style={{ opacity: 0 }} />
       <Handle type="target" position={Position.Left} id="left" style={{ opacity: 0 }} />
 
-      {/* Source Handles (화면에 보이는 빨간 점 - 네온 글로우 스타일) */}
-      <Handle type="source" position={Position.Bottom} id="bottom" style={{ background: '#ff4757', width: 10, height: 10, border: '2px solid #fff', left: '15%', boxShadow: '0 0 8px rgba(255, 71, 87, 0.8)' }} />
-      <Handle type="source" position={Position.Right} id="right" style={{ background: '#ff4757', width: 10, height: 10, border: '2px solid #fff', boxShadow: '0 0 8px rgba(255, 71, 87, 0.8)' }} />
+      {/* Source Handles */}
+      <Handle type="source" position={Position.Bottom} id="bottom" style={{ background: '#4285f4', width: 12, height: 12, border: '2.5px solid #fff', left: '20%', boxShadow: '0 0 12px rgba(66, 133, 244, 0.8)' }} />
+      <Handle type="source" position={Position.Right} id="right" style={{ background: '#4285f4', width: 12, height: 12, border: '2.5px solid #fff', boxShadow: '0 0 12px rgba(66, 133, 244, 0.8)' }} />
 
-      {/* 1번 (Circle Index - Premium Glass Orb) */}
+      {/* 순서 표시 동그라미 (Global Index) - 복구 */}
       <div style={{
         position: 'absolute',
         top: '-18px',
         left: '-18px',
-        width: '44px',
-        height: '44px',
+        width: '40px',
+        height: '40px',
         borderRadius: '50%',
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.02) 100%)',
-        backdropFilter: 'blur(8px)',
-        border: `2px solid ${label.startsWith('B') ? '#4ea8de' : label.includes('-S') ? '#ffd700' : '#ff4757'}`,
-        boxShadow: `0 4px 12px rgba(0,0,0,0.3), inset 0 2px 8px ${label.startsWith('B') ? 'rgba(78,168,222,0.3)' : label.includes('-S') ? 'rgba(255,215,0,0.3)' : 'rgba(255,71,87,0.3)'}, 0 0 10px ${label.startsWith('B') ? 'rgba(78,168,222,0.4)' : label.includes('-S') ? 'rgba(255,215,0,0.4)' : 'rgba(255,71,87,0.4)'}`,
+        background: `linear-gradient(135deg, ${themeColor}33 0%, rgba(10, 12, 15, 1) 100%)`,
+        border: `2.5px solid ${themeColor}`,
+        boxShadow: `0 4px 12px rgba(0,0,0,0.5), 0 0 15px ${themeColor}66`,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         fontSize: '16px',
         fontWeight: '800',
         color: '#ffffff',
-        zIndex: 10
+        zIndex: 50
       }}>
         {globalIndex}
       </div>
 
-      {/* 상단 (별표 + 이해도 게이지) */}
-      <div style={{ display: 'flex', marginLeft: '32px', alignItems: 'center', gap: '24px' }}>
-        <div 
-          onClick={(e) => { e.stopPropagation(); onUpdate(id, { is_favorite: !isFavorite }); }}
-          onDoubleClick={(e) => e.stopPropagation()}
-          style={{ 
-            fontSize: '28px', 
-            color: isFavorite ? '#ffd700' : 'rgba(255,255,255,0.15)',
-            filter: isFavorite ? 'drop-shadow(0 0 8px rgba(255, 215, 0, 0.6))' : 'none',
-            cursor: 'pointer',
-            lineHeight: 1,
-            transition: 'all 0.2s ease',
-            transform: isFavorite ? 'scale(1.1)' : 'scale(1)'
+      {/* 상단 이해도 수치 칸 (동그라미) */}
+      <div style={{ 
+        position: 'absolute', 
+        top: '-12px', 
+        left: '50%', 
+        transform: 'translateX(-50%)', 
+        display: 'flex', 
+        gap: '24px',
+        zIndex: 30 
+      }}>
+        {[1, 2, 3, 4, 5].map(v => (
+          <div 
+            key={v}
+            onClick={(e) => { e.stopPropagation(); onUpdate(id, { understanding_score: v }); }}
+            onDoubleClick={(e) => e.stopPropagation()}
+            style={{
+              width: '24px',
+              height: '24px',
+              borderRadius: '50%',
+              background: v <= (score || 0) 
+                ? 'linear-gradient(135deg, #00c6ff 0%, #0072ff 100%)' 
+                : '#1a1c22', 
+              border: v <= (score || 0) 
+                ? '2px solid rgba(255,255,255,0.8)' 
+                : '1.5px solid rgba(255,255,255,0.1)', 
+              borderTopColor: v <= (score || 0) ? 'rgba(255,255,255,0.8)' : 'transparent',
+              boxShadow: v <= (score || 0) ? '0 0 15px rgba(0, 198, 255, 0.6)' : 'none',
+              cursor: 'pointer',
+              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              position: 'relative'
+            }}
+            onMouseEnter={(e) => {
+              if (v > (score || 0)) {
+                e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+                e.currentTarget.style.border = '1.5px solid rgba(255,255,255,0.2)';
+                e.currentTarget.style.borderTopColor = 'transparent';
+              } else {
+                e.currentTarget.style.transform = 'scale(1.2)';
+                e.currentTarget.style.filter = 'brightness(1.2)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (v > (score || 0)) {
+                e.currentTarget.style.background = '#1a1c22';
+                e.currentTarget.style.border = '1.5px solid rgba(255,255,255,0.1)';
+                e.currentTarget.style.borderTopColor = 'transparent';
+              } else {
+                e.currentTarget.style.transform = 'scale(1)';
+                e.currentTarget.style.filter = 'none';
+              }
+            }}
+          />
+        ))}
+      </div>
+
+      {/* 상단 레이어: 휴지통 (오른쪽 상단 밀착) */}
+      <div style={{ position: 'absolute', top: '0', right: '0', zIndex: 40 }}>
+        <button 
+          onClick={(e) => { 
+            e.stopPropagation(); 
+            data.onClick();
+            setTimeout(() => { if (data.onDelete) data.onDelete(); }, 10);
           }}
-          onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.2)'}
-          onMouseLeave={(e) => e.currentTarget.style.transform = isFavorite ? 'scale(1.1)' : 'scale(1)'}
+          onDoubleClick={(e) => e.stopPropagation()}
+          style={{
+            background: 'rgba(255,255,255,0.05)', 
+            border: 'none', 
+            cursor: 'pointer',
+            color: 'rgba(255,255,255,0.3)', 
+            padding: '10px 14px',
+            borderRadius: '0 24px 0 12px',
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = '#ff4757';
+            e.currentTarget.style.background = 'rgba(255, 71, 87, 0.15)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = 'rgba(255,255,255,0.3)';
+            e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+          }}
         >
-          ★
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </button>
+      </div>
+
+      {/* 메인 콘텐츠 레이아웃 */}
+      <div style={{ display: 'flex', alignItems: 'center', height: '100%', gap: '10px', marginTop: '4px' }}>
+        {/* 좌측 컬럼: 분류번호 + 별표 */}
+        <div style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          gap: '8px',
+          minWidth: '35px'
+        }}>
+          <div 
+            title={label}
+            style={{ 
+              fontSize: '11px', 
+              fontWeight: '800', 
+              background: 'rgba(25, 28, 35, 0.6)', 
+              padding: '3px 8px', 
+              borderRadius: '6px',
+              color: themeColor,
+              border: `1px solid ${themeColor}44`,
+              letterSpacing: '0.5px',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            {label.includes('-S') ? label.substring(label.lastIndexOf('-S') + 1) : label}
+          </div>
+
+          <div 
+            onClick={(e) => { e.stopPropagation(); onUpdate(id, { is_favorite: !isFavorite }); }}
+            onDoubleClick={(e) => e.stopPropagation()}
+            style={{ 
+              fontSize: '28px', 
+              color: isFavorite ? '#ffd700' : 'rgba(255,255,255,0.1)',
+              filter: isFavorite ? 'drop-shadow(0 0 12px rgba(255, 215, 0, 0.5))' : 'none',
+              cursor: 'pointer',
+              transition: 'all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+              userSelect: 'none',
+              lineHeight: 1
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.2) rotate(15deg)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1) rotate(0deg)'}
+          >
+            ★
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '4px' }}>
-          {[1, 2, 3, 4, 5].map(v => (
-            <div 
-              key={v}
-              onClick={(e) => { e.stopPropagation(); onUpdate(id, { understanding_score: v }); }}
-              onDoubleClick={(e) => e.stopPropagation()}
-              style={{
-                width: '32px',
-                height: '8px',
-                borderRadius: '4px',
-                background: v <= (score || 0) ? 'linear-gradient(90deg, #00c6ff 0%, #0072ff 100%)' : 'rgba(255,255,255,0.1)',
-                boxShadow: v <= (score || 0) ? '0 0 10px rgba(0, 198, 255, 0.5)' : 'none',
-                cursor: 'pointer',
-                transition: 'all 0.3s ease'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.filter = 'brightness(1.3)'}
-              onMouseLeave={(e) => e.currentTarget.style.filter = 'none'}
-            />
-          ))}
+        {/* 우측 컬럼: 중앙 정렬된 제목 */}
+        <div style={{ 
+          flex: 1, 
+          display: 'flex', 
+          alignItems: 'center',
+          justifyContent: 'flex-start',
+          borderLeft: '1px solid rgba(255,255,255,0.05)',
+          paddingLeft: '10px',
+          height: '70%'
+        }}>
+          <div style={{ 
+            fontSize: '22px', 
+            fontWeight: '700',
+            color: '#ffffff',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            lineHeight: '1.4',
+            textShadow: '0 2px 10px rgba(0,0,0,0.3)'
+          }}>
+            {title || '(제목 없음)'}
+          </div>
         </div>
       </div>
 
-      {/* 좌측 중앙 (선 끊기 버튼) - 마우스 호버 시에만 표시되며, 기준 노드가 있을 때만(선이 연결되어 있을 때만) 나타남 */}
+      {/* 선 끊기 버튼 (호버 시 표시) */}
       {isHovered && data.reference_node_id && (
-        <div style={{ position: 'absolute', top: '50%', left: '-12px', transform: 'translateY(-50%)', zIndex: 20 }}>
+        <div style={{ position: 'absolute', top: '50%', left: '-14px', transform: 'translateY(-50%)', zIndex: 40 }}>
           <button 
             onClick={(e) => { 
               e.stopPropagation();
@@ -143,14 +388,14 @@ const NodeCard = ({ data, id }) => {
             }}
             onDoubleClick={(e) => e.stopPropagation()}
             style={{
-              width: '24px', height: '24px', borderRadius: '50%',
-              background: '#ff4757', border: '2px solid #191c23', cursor: 'pointer',
+              width: '28px', height: '28px', borderRadius: '50%',
+              background: '#ff4757', border: '3px solid #1a1c22', cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               color: 'white', padding: 0,
-              boxShadow: '0 0 8px rgba(255, 71, 87, 0.6)',
-              transition: 'transform 0.2s',
+              boxShadow: '0 4px 12px rgba(255, 71, 87, 0.4)',
+              transition: 'all 0.2s',
             }}
-            title="선 끊기 (독립 노드로 만들기)"
+            title="선 끊기"
             onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.2)'}
             onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
           >
@@ -161,165 +406,119 @@ const NodeCard = ({ data, id }) => {
           </button>
         </div>
       )}
-
-      {/* 우측 상단 (휴지통 버튼) */}
-      <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 20 }}>
-        <button 
-          onClick={(e) => { 
-            e.stopPropagation(); 
-            data.onClick(); // 선택 상태로 만들기 (삭제 모달이 selectedNode 참조)
-            setTimeout(() => {
-              if (data.onDelete) data.onDelete(); // 약간의 지연 후 모달 띄우기
-            }, 10);
-          }}
-          onDoubleClick={(e) => e.stopPropagation()}
-          style={{
-            background: 'transparent', border: 'none', cursor: 'pointer',
-            color: 'rgba(255,255,255,0.3)', padding: '4px',
-            transition: 'all 0.2s',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = '#ff4757';
-            e.currentTarget.style.transform = 'scale(1.1)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = 'rgba(255,255,255,0.3)';
-            e.currentTarget.style.transform = 'scale(1)';
-          }}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="3 6 5 6 21 6"></polyline>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-          </svg>
-        </button>
-      </div>
-
-      {/* 하단 (분류코드 + 제목) */}
-      <div style={{ display: 'flex', marginTop: 'auto', gap: '16px', alignItems: 'center', marginLeft: '12px' }}>
-        <div 
-          title={label}
-          style={{ 
-            fontSize: '12px', 
-            fontWeight: '700', 
-            background: 'rgba(255,255,255,0.1)', 
-            padding: '4px 8px', 
-            borderRadius: '6px',
-            color: '#a1a1aa',
-            letterSpacing: '0.5px'
-          }}
-        >
-          {label.includes('-S') ? label.substring(label.lastIndexOf('-S') + 1) : label}
-        </div>
-        <div style={{ 
-          fontSize: '16px', 
-          fontWeight: '500',
-          color: '#ffffff',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          flex: 1,
-          textShadow: '0 2px 4px rgba(0,0,0,0.5)'
-        }}>
-          {title || '(제목 없음)'}
-        </div>
-      </div>
     </div>
   );
 };
 
 const nodeTypes = { nodeCard: NodeCard };
 
-/* ─── 커스텀 직교 트리 레이아웃 (Indented Tree) ─── */
+/* ─── 커스텀 직교 트리 레이아웃 (Collision-Aware Directional Tree) ─── */
 const getLayoutedElements = (flowNodes, flowEdges) => {
-  const X_GAP = 80;    // 최상위 형제들 간의 가로 간격
-  const Y_GAP = 60;    // 자식 노드들 간의 세로 간격
-  const X_INDENT = 80; // 자식 노드가 부모보다 우측으로 들어가는 들여쓰기 간격
+  const X_GAP = 100;
+  const Y_GAP = 60;
+  const X_INDENT = 80;
 
   // 1. 트리 구조화
   const nodeMap = {};
   flowNodes.forEach(n => {
-    nodeMap[n.id] = { ...n, children: [] };
+    nodeMap[n.id] = { ...n, children: [], position: null };
   });
 
-  const roots = [];
-  flowNodes.forEach(n => {
-    // 1:1 방사형 트리 구조: reference_node_id 기준 연결
-    const refId = n.data.reference_node_id; // 프론트엔드 노드 데이터 매핑에서 전달됨
-    if (refId && nodeMap[refId]) {
-      nodeMap[refId].children.push(nodeMap[n.id]);
-    } else {
-      roots.push(nodeMap[n.id]);
+  flowEdges.forEach(e => {
+    if (nodeMap[e.source] && nodeMap[e.target]) {
+      nodeMap[e.source].children.push(nodeMap[e.target]);
     }
   });
 
-  // 순서 정렬 (숫자 기준 오름차순)
-  const sortNodes = (nodesList) => {
-    nodesList.sort((a, b) => a.data.label.localeCompare(b.data.label, undefined, { numeric: true }));
-    nodesList.forEach(child => sortNodes(child.children));
+  // 루트 노드 찾기
+  const roots = flowNodes.filter(n => !flowEdges.some(e => e.target === n.id)).map(n => nodeMap[n.id]);
+
+  // 점유된 영역 추적 (수동 위치 노드 포함)
+  const occupiedRects = flowNodes
+    .filter(n => n.data.position_x !== null && n.data.position_y !== null)
+    .map(n => ({
+      id: n.id,
+      x: n.data.position_x,
+      y: n.data.position_y,
+      w: NODE_WIDTH,
+      h: NODE_HEIGHT
+    }));
+
+  const isOverlap = (rect) => {
+    return occupiedRects.some(r => 
+      rect.id !== r.id &&
+      rect.x < r.x + r.w + X_GAP / 2 &&
+      rect.x + rect.w + X_GAP / 2 > r.x &&
+      rect.y < r.y + r.h + Y_GAP / 2 &&
+      rect.y + rect.h + Y_GAP / 2 > r.y
+    );
   };
-  sortNodes(roots);
 
-  // 2. 재귀적 좌표 계산
-  let currentX = 0;
-  
-  for (let root of roots) {
-    let currentY = 0; // 각 루트 트리는 최상단(y=0)부터 시작
+  const findFreeY = (rect) => {
+    let originalY = rect.y;
+    while (isOverlap(rect)) {
+      rect.y += (NODE_HEIGHT + Y_GAP) / 2;
+      if (rect.y > originalY + 10000) break; // 무한 루프 방지
+    }
+    return rect.y;
+  };
 
-    function layoutNode(node, x, depth) {
-      node.position = { x, y: currentY };
-      let nodeStartY = currentY;
-      currentY += NODE_HEIGHT + Y_GAP;
-      
-      let maxSubtreeX = x + NODE_WIDTH;
-      
-      // 자식 노드 분리 (Right 브랜치 vs Bottom 브랜치)
-      const sourceDepth = (node.data.label.match(/-S/g) || []).length;
-      const rightChildren = [];
-      const bottomChildren = [];
-      
-      node.children.forEach(c => {
-        const targetDepth = (c.data.label.match(/-S/g) || []).length;
-        if (targetDepth > sourceDepth) bottomChildren.push(c);
-        else rightChildren.push(c);
-      });
+  function layoutNode(node, startX, startY) {
+    let finalX = startX;
+    let finalY = startY;
 
-      // 1. Right 브랜치 배치 (우측으로 뻗어나감, 다수일 경우 세로 누적)
-      if (rightChildren.length > 0) {
-        let tempY = currentY;
-        currentY = nodeStartY; // 부모와 수평 위치에서 시작
-        for (let rc of rightChildren) {
-          let childMaxX = layoutNode(rc, x + NODE_WIDTH + X_GAP, depth);
-          maxSubtreeX = Math.max(maxSubtreeX, childMaxX);
-        }
-        currentY = Math.max(tempY, currentY); // 하단 자식들이 우측 자식들과 겹치지 않도록 Y 확보
-      }
-      
-      // 2. Bottom 브랜치 배치 (하단으로 뻗어나감, 다수일 경우 세로 누적)
-      for (let bc of bottomChildren) {
-        let childMaxX = layoutNode(bc, x + X_INDENT, depth + 1);
-        maxSubtreeX = Math.max(maxSubtreeX, childMaxX);
-      }
-      
-      return maxSubtreeX;
+    // 수동 위치가 있으면 그대로 사용, 없으면 빈 공간 찾기
+    if (node.data.position_x !== null && node.data.position_y !== null) {
+      finalX = node.data.position_x;
+      finalY = node.data.position_y;
+    } else {
+      finalY = findFreeY({ id: node.id, x: finalX, y: finalY, w: NODE_WIDTH, h: NODE_HEIGHT });
+      occupiedRects.push({ id: node.id, x: finalX, y: finalY, w: NODE_WIDTH, h: NODE_HEIGHT });
     }
 
-    let maxRootX = layoutNode(root, currentX, 0);
-    currentX = maxRootX + X_GAP;
+    node.position = { x: finalX, y: finalY };
+    
+    let maxSubtreeY = finalY + NODE_HEIGHT + Y_GAP;
+    let maxSubtreeX = finalX + NODE_WIDTH + X_GAP;
+
+    // 자식 분리
+    const sourceDepth = (node.data.label.match(/-S/g) || []).length;
+    const rightChildren = node.children.filter(c => (c.data.label.match(/-S/g) || []).length <= sourceDepth);
+    const bottomChildren = node.children.filter(c => (c.data.label.match(/-S/g) || []).length > sourceDepth);
+
+    // 1. 우측 자식 배치
+    let nextRightY = finalY;
+    for (let rc of rightChildren) {
+      let subtreeRes = layoutNode(rc, finalX + NODE_WIDTH + X_GAP, nextRightY);
+      nextRightY = subtreeRes.maxY;
+      maxSubtreeY = Math.max(maxSubtreeY, subtreeRes.maxY);
+      maxSubtreeX = Math.max(maxSubtreeX, subtreeRes.maxX);
+    }
+
+    // 2. 하단 자식 배치
+    let nextBottomY = Math.max(maxSubtreeY, finalY + NODE_HEIGHT + Y_GAP);
+    for (let bc of bottomChildren) {
+      let subtreeRes = layoutNode(bc, finalX + X_INDENT, nextBottomY);
+      nextBottomY = subtreeRes.maxY;
+      maxSubtreeY = Math.max(maxSubtreeY, subtreeRes.maxY);
+      maxSubtreeX = Math.max(maxSubtreeX, subtreeRes.maxX);
+    }
+
+    return { maxY: maxSubtreeY, maxX: maxSubtreeX };
   }
 
-  // 3. 플랫 배열로 다시 변환
+  let currentRootX = 0;
+  let currentRootY = 0;
+  for (let root of roots) {
+    let res = layoutNode(root, currentRootX, 0);
+    currentRootX = res.maxX;
+  }
+
   const layoutedNodes = flowNodes.map(n => {
-    const layoutInfo = nodeMap[n.id].position;
-    const existingX = n.data.position_x;
-    const existingY = n.data.position_y;
-    
+    const info = nodeMap[n.id];
     return {
       ...n,
-      position: (existingX !== null && existingY !== null) 
-        ? { x: existingX, y: existingY } 
-        : (layoutInfo || { x: 0, y: 0 }),
-      sourcePosition: Position.Bottom,
-      targetPosition: Position.Top, // 미사용 (Left/Right 직접 사용)
+      position: info.position || { x: 0, y: 0 }
     };
   });
 
@@ -392,8 +591,25 @@ const buildFlowData = (nodes, selectedNode, onNodeClick, onDoubleClickNode, onUp
   return { flowNodes, flowEdges };
 };
 
-/* ─── 메인 컴포넌트 ─── */
-export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubleClickNode, onUpdateMetadata, onDeleteNode, onConnectEdge, savedViewport, onViewportChange }) {
+/* ─── 전체 노드 맵 뷰 컨테이너 ─── */
+export default function NodeTreeView({ 
+  nodes, 
+  selectedNode, 
+  onNodeClick, 
+  onDoubleClickNode, 
+  onUpdateMetadata, 
+  onDeleteNode, 
+  onConnectEdge, 
+  savedViewport, 
+  onViewportChange,
+  isDrawingMode,
+  drawingTool,
+  penColor,
+  highlighterColor,
+  drawings,
+  setDrawings,
+  onSaveDrawings
+}) {
   const { flowNodes: rawNodes, flowEdges: rawEdges } = useMemo(
     () => buildFlowData(nodes, selectedNode, onNodeClick, onDoubleClickNode, onUpdateMetadata, onDeleteNode),
     [nodes, selectedNode, onNodeClick, onDoubleClickNode, onUpdateMetadata, onDeleteNode]
@@ -405,18 +621,15 @@ export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubl
   );
 
   const [rfNodes, setNodes, onNodesChange] = useNodesState(layoutedNodes);
-  const [rfEdges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);
+  const [rfEdges, setEdges, onEdgesChangeEdges] = useEdgesState(layoutedEdges);
   
-  // 드래그 중 델타(이동량) 계산을 위한 참조값
   const lastPosRef = useRef({ x: 0, y: 0 });
 
-  // 데이터(nodes prop)가 변경될 때마다 React Flow 내부 상태 동기화
   useEffect(() => {
     setNodes(layoutedNodes);
     setEdges(layoutedEdges);
   }, [layoutedNodes, layoutedEdges, setNodes, setEdges]);
 
-  // ─── 1. 후손 노드 탐색 로직 (재귀) ───
   const getSubtreeIds = (nodeId, edges) => {
     const descendants = [];
     const queue = [nodeId];
@@ -437,9 +650,7 @@ export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubl
     return descendants;
   };
 
-  // ─── 2. 동시 드래그 로직 ───
   const onNodeDragStart = (event, node) => {
-    // 드래그 시작 시점의 위치 저장
     lastPosRef.current = { x: node.position.x, y: node.position.y };
   };
 
@@ -450,16 +661,13 @@ export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubl
       return;
     }
 
-    // 이전 프레임 대비 이동량(Delta) 계산
     const dx = node.position.x - lastPosRef.current.x;
     const dy = node.position.y - lastPosRef.current.y;
 
     if (dx === 0 && dy === 0) return;
 
-    // 현재 위치를 다음 프레임을 위한 기준값으로 업데이트
     lastPosRef.current = { x: node.position.x, y: node.position.y };
 
-    // 모든 후손 노드들을 부모의 이동량만큼 동시 이동
     setNodes((nds) =>
       nds.map((n) => {
         if (subtreeIds.includes(n.id)) {
@@ -473,7 +681,6 @@ export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubl
     );
   };
 
-  // ─── 3. 충돌 감지 및 밀어내기 로직 (onNodeDragStop) ───
   const onNodeDragStop = (event, node) => {
     const subtreeIds = [node.id, ...getSubtreeIds(node.id, rfEdges)];
     
@@ -526,8 +733,6 @@ export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubl
 
     setNodes(finalNodes);
 
-    // ─── 4. 변경된 좌표 백엔드 저장 ───
-    // 드래그된 그룹(노드 및 후손)의 최종 좌표를 서버에 반영
     finalNodes.forEach(fn => {
       if (subtreeIds.includes(fn.id)) {
         if (onUpdateMetadata) {
@@ -553,12 +758,12 @@ export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubl
   }
 
   return (
-    <div style={{ width: '100%', height: '100%' }}>
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}
         onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
+        onEdgesChange={onEdgesChangeEdges}
         onNodeDragStart={onNodeDragStart}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
@@ -589,8 +794,16 @@ export default function NodeTreeView({ nodes, selectedNode, onNodeClick, onDoubl
           }}
           maskColor="rgba(0,0,0,0.5)"
         />
+        <DrawingLayer 
+          isDrawingMode={isDrawingMode} 
+          drawingTool={drawingTool} 
+          penColor={penColor}
+          highlighterColor={highlighterColor}
+          drawings={drawings} 
+          setDrawings={setDrawings}
+          onSaveDrawings={onSaveDrawings}
+        />
       </ReactFlow>
     </div>
   );
 }
-

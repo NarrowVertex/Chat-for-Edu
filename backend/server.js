@@ -334,6 +334,19 @@ app.get('/api/chats/:userId', async (req, res) => {
   }
 });
 
+// 특정 채팅 상세 정보 가져오기 (드로잉 등 포함)
+app.get('/api/chats/detail/:id', async (req, res) => {
+  try {
+    const chatId = req.params.id;
+    const [rows] = await db.execute('SELECT * FROM Chats WHERE id = ?', [chatId]);
+    if (rows.length === 0) return res.status(404).json({ error: "채팅을 찾을 수 없습니다." });
+    res.json(rows[0]);
+  } catch (error) {
+    console.error("Fetch Chat Detail Error:", error);
+    res.status(500).json({ error: "채팅 정보를 불러오지 못했습니다." });
+  }
+});
+
 // 채팅 제목 수정 API
 app.patch('/api/chats/:id', async (req, res) => {
   try {
@@ -346,6 +359,20 @@ app.patch('/api/chats/:id', async (req, res) => {
   } catch (error) {
     console.error("Update Chat Title Error:", error);
     res.status(500).json({ error: "제목 수정에 실패했습니다." });
+  }
+});
+
+// 채팅 그림(드로잉) 데이터 저장 API
+app.patch('/api/chats/:id/drawings', async (req, res) => {
+  try {
+    const chatId = req.params.id;
+    const { drawings } = req.body; // JSON string expected
+    
+    await db.execute('UPDATE Chats SET drawings = ? WHERE id = ?', [drawings, chatId]);
+    res.json({ message: "드로잉 데이터가 저장되었습니다." });
+  } catch (error) {
+    console.error("Update Chat Drawings Error:", error);
+    res.status(500).json({ error: "드로잉 저장에 실패했습니다." });
   }
 });
 

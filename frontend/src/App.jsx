@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import {
   Menu, Plus, Compass, Sparkles, Mic, Paperclip, MessageSquare, MessageCircle, X,
   ArrowLeft, Search, Share2, Star, Edit3, RotateCcw, ThumbsUp, ThumbsDown,
-  MoreVertical, ChevronRight, ChevronDown, Hash, Send, ExternalLink, CornerDownRight, SquarePlus, Trash2, Loader2, Bell, Check
+  MoreVertical, ChevronRight, ChevronDown, Hash, Send, ExternalLink, CornerDownRight, SquarePlus, Trash2, Loader2, Bell, Check,
+  Pencil, Highlighter, Eraser, Type
 } from 'lucide-react';
 import './App.css';
 import ReactMarkdown from 'react-markdown';
@@ -44,6 +45,7 @@ function App() {
   const [contextNode, setContextNode] = useState(null);
   const [isContextSelectorOpen, setIsContextSelectorOpen] = useState(false);
   const [collapsedNodes, setCollapsedNodes] = useState(new Set()); // 접힌 노드 ID 목록
+  const [isNodeModalOpen, setIsNodeModalOpen] = useState(false);
 
   const toggleCollapse = (nodeId, e) => {
     e.stopPropagation(); // 노드 선택 이벤트 방지
@@ -78,6 +80,16 @@ function App() {
 
   // Smart Icon Toggle States
   const [activeIcons, setActiveIcons] = useState({ next: false, node: false, sparkle: false });
+
+  // Drawing State
+  const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [drawingTool, setDrawingTool] = useState('pen'); // 'pen', 'highlighter', 'eraser'
+  const [penColor, setPenColor] = useState('#ffffff');
+  const [highlighterColor, setHighlighterColor] = useState('#ffff00');
+  const [activeColorPicker, setActiveColorPicker] = useState(null); // 'pen' | 'highlighter' | null
+  const [drawings, setDrawings] = useState([]);
+
+  const PRESET_COLORS = ['#ffffff', '#ff4757', '#ffa502', '#2ed573', '#1e90ff', '#3742fa', '#ff6b81', '#ffff00', '#00ffff', '#a4b0be'];
 
   // Login State
   const [loginId, setLoginId] = useState('');
@@ -572,6 +584,12 @@ function App() {
     }
   }, [currentUser]);
 
+  // 프로젝트 변경 또는 뷰 모드(채팅/노드/퀴즈) 변경 시 필기 모드 해제
+  useEffect(() => {
+    setIsDrawingMode(false);
+    setActiveColorPicker(null);
+  }, [activeChat?.id, viewMode]);
+
   // 로그인된 사용자별로 localStorage에서 노드 모드 viewport 복원
   // 로그아웃하거나 다른 계정으로 바꾸면 이전 사용자의 viewport는 메모리에서 제거됨
   useEffect(() => {
@@ -713,12 +731,46 @@ function App() {
     setNodes([]); // 이전 프로젝트 노드 비우기
     setSelectedNode(null); // 선택된 노드 초기화
     setQuizList([]); // 이전 프로젝트 퀴즈 목록 비우기
+    setDrawings([]); // 이전 프로젝트 필기 비우기
+    setIsDrawingMode(false); // 필기 모드 초기화
     
     // 2. 새 프로젝트 정보 설정
     setActiveChat(chat);
     
-    // 3. 새 프로젝트 세션 복구
+    // 3. 서버에서 최신 드로잉 데이터 가져오기 (사이드바 데이터가 stale할 수 있으므로)
+    const syncDrawings = async () => {
+      try {
+        const response = await fetch(`http://localhost:5000/api/chats/detail/${chat.id}`);
+        if (response.ok) {
+          const freshChat = await response.json();
+          if (freshChat.drawings) {
+            setDrawings(JSON.parse(freshChat.drawings));
+          } else {
+            setDrawings([]);
+          }
+          // 로컬 데이터도 최신화
+          setActiveChat(freshChat);
+        } else {
+          // 실패 시 기존 데이터 사용
+          if (chat.drawings) {
+            setDrawings(JSON.parse(chat.drawings));
+          } else {
+            setDrawings([]);
+          }
+        }
+      } catch (err) {
+        console.error('Sync drawings error:', err);
+        if (chat.drawings) {
+          setDrawings(JSON.parse(chat.drawings));
+        } else {
+          setDrawings([]);
+        }
+      }
+    };
+
+    // 4. 새 프로젝트 세션 복구
     restoreSession(chat.id);
+    syncDrawings();
     
     setView('project');
   };
@@ -730,6 +782,7 @@ function App() {
     setActiveChat(null);
     setNodes([]);
     setSelectedNode(null);
+    setViewMode('chat'); // 홈으로 나갈 때 뷰 모드 초기화
     setView('home');
   };
 
@@ -1238,7 +1291,7 @@ function App() {
 
   return (
     <div 
-      className="app-container"
+      className={`app-container mode-${viewMode} view-${view}`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -1266,16 +1319,16 @@ function App() {
               <div className="header-top">
                 <button className="icon-button" onClick={exitProject}><ArrowLeft size={20} /></button>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  <button className="icon-button"><Search size={20} /></button>
-                  <button className="icon-button trash-btn" onClick={() => setIsDeleteProjectModalOpen(true)}>
-                    <Trash2 size={18} />
-                  </button>
                   <button className="icon-button" onClick={() => {
                     setIsEditingTitle(true);
                     setEditedTitle(activeChat?.title || '');
                   }}>
                     <Edit3 size={18} />
                   </button>
+                  <button className="icon-button trash-btn" onClick={() => setIsDeleteProjectModalOpen(true)}>
+                    <Trash2 size={18} />
+                  </button>
+                  <button className="icon-button"><Search size={20} /></button>
                 </div>
               </div>
               {isEditingTitle ? (
@@ -1612,25 +1665,122 @@ function App() {
           ) : (
             /* 노드 상세 화면 (Project View) */
             viewMode === 'node' ? (
-              <div style={{
-                position: 'absolute',
-                top: 0, left: 0, right: 0, bottom: 0,
-                zIndex: 1,
-              }}>
-                <NodeTreeView
-                  nodes={nodes}
-                  selectedNode={selectedNode}
-                  onNodeClick={(node) => setSelectedNode(node)}
-                  onDoubleClickNode={(node) => {
-                    setSelectedNode(node);
-                    setViewMode('chat');
-                  }}
-                  onUpdateMetadata={updateNodeMetadata}
-                  onDeleteNode={() => setIsDeleteNodeModalOpen(true)}
-                  onConnectEdge={handleConnectEdge}
-                  savedViewport={activeChat ? projectSessionMap[activeChat.id]?.viewport : undefined}
-                  onViewportChange={handleNodeViewportChange}
-                />
+              <div className="node-view-split fade-in">
+                <div className="node-graph-area">
+                  <NodeTreeView
+                    nodes={nodes}
+                    selectedNode={selectedNode}
+                    onNodeClick={(node) => setSelectedNode(node)}
+                    onDoubleClickNode={(node) => {
+                      setSelectedNode(node);
+                      setIsNodeModalOpen(true);
+                    }}
+                    onUpdateMetadata={updateNodeMetadata}
+                    onDeleteNode={() => setIsDeleteNodeModalOpen(true)}
+                    onConnectEdge={handleConnectEdge}
+                    savedViewport={activeChat ? projectSessionMap[activeChat.id]?.viewport : undefined}
+                    onViewportChange={handleNodeViewportChange}
+                    isDrawingMode={isDrawingMode}
+                    drawingTool={drawingTool}
+                    penColor={penColor}
+                    highlighterColor={highlighterColor}
+                    drawings={drawings}
+                    setDrawings={setDrawings}
+                    onSaveDrawings={async (newDrawings) => {
+                      if (!activeChat) return;
+                      try {
+                        await fetch(`http://localhost:5000/api/chats/${activeChat.id}/drawings`, {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ drawings: JSON.stringify(newDrawings) })
+                        });
+                        // update activeChat local ref
+                        const drawingsStr = JSON.stringify(newDrawings);
+                        setActiveChat(prev => ({ ...prev, drawings: drawingsStr }));
+                        
+                        // 사이드바 목록(historyItems)도 동기화하여 프로젝트 전환 시 데이터 유지
+                        setHistoryItems(prev => prev.map(item => 
+                          String(item.id) === String(activeChat.id) 
+                            ? { ...item, drawings: drawingsStr } 
+                            : item
+                        ));
+                      } catch (err) {
+                        console.error('Failed to save drawings:', err);
+                      }
+                    }}
+                  />
+                </div>
+
+                {/* 우측 패널 (메시지 형태) */}
+                {isNodeModalOpen && selectedNode && (
+                  <div className="node-right-panel">
+                    <div className="panel-header">
+                      <div>
+                        <div className={`node-tag ${getTagColorClass(selectedNode.node_label)}`}>
+                          {getDisplayLabel(selectedNode.node_label)}
+                        </div>
+                        {isEditingNodeTitle ? (
+                          <div className="title-edit-container">
+                            <input
+                              type="text"
+                              className="title-edit-input"
+                              value={editedNodeTitle}
+                              onChange={(e) => setEditedNodeTitle(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleNodeTitleUpdate();
+                                if (e.key === 'Escape') setIsEditingNodeTitle(false);
+                              }}
+                              autoFocus
+                            />
+                            <div className="title-edit-actions">
+                              <button onClick={handleNodeTitleUpdate}><Check size={16} /></button>
+                              <button onClick={() => setIsEditingNodeTitle(false)}><X size={16} /></button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="editable-title-wrapper">
+                            <h3>{selectedNode.node_title || '(제목 없음)'}</h3>
+                            <button 
+                              className="edit-title-btn" 
+                              onClick={() => {
+                                setEditedNodeTitle(selectedNode.node_title);
+                                setIsEditingNodeTitle(true);
+                              }}
+                              title="제목 수정"
+                            >
+                              <Edit3 size={16} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <button className="panel-close-btn" onClick={() => setIsNodeModalOpen(false)}>
+                        <X size={24} />
+                      </button>
+                    </div>
+                    
+                    <div className="panel-scroll-area">
+                      {/* 질문 (사용자 말풍선) */}
+                      <div className="panel-message user">
+                        <span className="panel-message-label">{selectedNode.node_type === 'content' ? '메모' : '질문'}</span>
+                        <div className="panel-bubble">
+                          {selectedNode.question_text}
+                        </div>
+                      </div>
+
+                      {/* 답변 (AI 말풍선) */}
+                      {selectedNode.node_type !== 'content' && selectedNode.answer_text && (
+                        <div className="panel-message ai">
+                          <span className="panel-message-label">AI 답변</span>
+                          <div className="panel-bubble">
+                            <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                              {sanitizeMarkdown(selectedNode.answer_text)}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : viewMode === 'quiz' ? (
               <div className="quiz-container fade-up-element">
@@ -2180,14 +2330,139 @@ function App() {
 
         {/* 공통 입력창 영역 */}
         {viewMode !== 'quiz' && (
-          <div className="input-area-wrapper">
+          <div className={`input-area-wrapper ${isNodeModalOpen && viewMode === 'node' ? 'panel-open' : ''}`}>
             {imagePreviewUrl && (
               <div className="image-preview-container">
                 <div className="preview-bubble"><img src={imagePreviewUrl} alt="p" /><button className="remove-image-btn" onClick={clearImage}><X size={14} /></button></div>
               </div>
             )}
 
-            <div className={`input-container ${isGenerating ? 'disabled' : ''}`}>
+            <div className="input-area-content" style={{ width: '100%', maxWidth: '800px', display: 'flex', flexDirection: 'column' }}>
+              {/* 좌측 상단 필기 모드 (노드 모드 전용) */}
+              {viewMode === 'node' && (
+                <div className="drawing-toolbar-wrapper" style={{ alignSelf: 'flex-start', marginLeft: '16px' }}>
+                  <div className="drawing-tools-bar">
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <button 
+                        className={`tool-btn ${isDrawingMode && drawingTool === 'pen' ? 'active' : ''}`} 
+                        onClick={() => {
+                          if (activeColorPicker === 'pen') {
+                            setActiveColorPicker(null);
+                            setIsDrawingMode(false);
+                          } else {
+                            setIsDrawingMode(true);
+                            setDrawingTool('pen');
+                            setActiveColorPicker('pen');
+                          }
+                        }} 
+                        title="펜 (클릭하여 색상 선택)"
+                      >
+                        <Pencil size={18} style={{ color: penColor }} />
+                      </button>
+                      {activeColorPicker === 'pen' && (
+                        <div style={{
+                          position: 'absolute', bottom: '100%', left: 0, marginBottom: '8px',
+                          background: 'rgba(25, 28, 35, 0.95)', padding: '10px', borderRadius: '16px',
+                          display: 'flex', flexWrap: 'wrap', width: '150px', gap: '8px', border: '1px solid rgba(255, 255, 255, 0.15)',
+                          boxShadow: '0 -8px 24px rgba(0,0,0,0.4)', zIndex: 1000,
+                          backdropFilter: 'blur(10px)'
+                        }}>
+                          {PRESET_COLORS.map(color => (
+                            <div 
+                              key={color}
+                              onClick={() => { setPenColor(color); setActiveColorPicker(null); }}
+                              style={{
+                                width: '22px', height: '22px', borderRadius: '50%', backgroundColor: color,
+                                cursor: 'pointer', border: penColor === color ? '2px solid #fff' : '1px solid rgba(255,255,255,0.2)',
+                                boxShadow: penColor === color ? '0 0 8px rgba(255,255,255,0.5)' : 'none',
+                                transition: 'all 0.2s'
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <button 
+                        className={`tool-btn ${isDrawingMode && drawingTool === 'highlighter' ? 'active' : ''}`} 
+                        onClick={() => {
+                          if (activeColorPicker === 'highlighter') {
+                            setActiveColorPicker(null);
+                            setIsDrawingMode(false);
+                          } else {
+                            setIsDrawingMode(true);
+                            setDrawingTool('highlighter');
+                            setActiveColorPicker('highlighter');
+                          }
+                        }} 
+                        title="형광펜 (클릭하여 색상 선택)"
+                      >
+                        <Highlighter size={18} style={{ color: highlighterColor }} />
+                      </button>
+                      {activeColorPicker === 'highlighter' && (
+                        <div style={{
+                          position: 'absolute', bottom: '100%', left: 0, marginBottom: '8px',
+                          background: 'rgba(25, 28, 35, 0.95)', padding: '10px', borderRadius: '16px',
+                          display: 'flex', flexWrap: 'wrap', width: '150px', gap: '8px', border: '1px solid rgba(255, 255, 255, 0.15)',
+                          boxShadow: '0 -8px 24px rgba(0,0,0,0.4)', zIndex: 1000,
+                          backdropFilter: 'blur(10px)'
+                        }}>
+                          {PRESET_COLORS.map(color => (
+                            <div 
+                              key={color}
+                              onClick={() => { setHighlighterColor(color); setActiveColorPicker(null); }}
+                              style={{
+                                width: '22px', height: '22px', borderRadius: '50%', backgroundColor: color,
+                                cursor: 'pointer', border: highlighterColor === color ? '2px solid #fff' : '1px solid rgba(255,255,255,0.2)',
+                                boxShadow: highlighterColor === color ? '0 0 8px rgba(255,255,255,0.5)' : 'none',
+                                opacity: 0.8,
+                                transition: 'all 0.2s'
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button 
+                      className={`tool-btn ${isDrawingMode && drawingTool === 'eraser' ? 'active' : ''}`} 
+                      onClick={() => {
+                        setActiveColorPicker(null); // 다른 색상 창 닫기
+                        if (drawingTool === 'eraser' && isDrawingMode) {
+                          setIsDrawingMode(false);
+                        } else {
+                          setIsDrawingMode(true);
+                          setDrawingTool('eraser');
+                        }
+                      }} 
+                      title="지우개"
+                    >
+                      <Eraser size={18} />
+                    </button>
+                    <div className="tool-divider" />
+                    <button 
+                      className="tool-btn" 
+                      onClick={() => {
+                        if(window.confirm('모든 필기를 지우시겠습니까?')) {
+                          setDrawings([]);
+                          if (activeChat) {
+                            fetch(`http://localhost:5000/api/chats/${activeChat.id}/drawings`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ drawings: JSON.stringify([]) })
+                            });
+                          }
+                        }
+                      }} 
+                      title="전체 삭제"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                </div>
+              )}
+              
+              <div className={`input-container ${isGenerating ? 'disabled' : ''}`}>
               <textarea
                 ref={textareaRef}
                 className="input-field"
@@ -2245,6 +2520,8 @@ function App() {
                         </button>
                       </div>
 
+
+
                       {selectedNode && (
                         <>
                           <button
@@ -2288,7 +2565,8 @@ function App() {
               </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
         {/* 계정 탈퇴 확인 모달 */}
         {isDeleteModalOpen && (
