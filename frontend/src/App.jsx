@@ -71,6 +71,9 @@ function App() {
   
   const textareaRef = useRef(null);
   const contextSelectorRef = useRef(null);
+  const modelSelectorRef = useRef(null);
+
+  const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
 
   // --- Quiz 관련 상태 ---
   const [quizConfig, setQuizConfig] = useState({
@@ -166,6 +169,23 @@ function App() {
 
     return () => document.removeEventListener('mousedown', handleClickOutside, true);
   }, [isContextSelectorOpen]);
+
+  // AI 모델 선택 팝업 닫기 (Click Outside)
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (modelSelectorRef.current && !modelSelectorRef.current.contains(event.target)) {
+        setIsModelSelectorOpen(false);
+      }
+    };
+
+    if (isModelSelectorOpen) {
+      document.addEventListener('mousedown', handleClickOutside, true);
+    } else {
+      document.removeEventListener('mousedown', handleClickOutside, true);
+    }
+
+    return () => document.removeEventListener('mousedown', handleClickOutside, true);
+  }, [isModelSelectorOpen]);
 
   // 사용 가능한 AI 모델 목록 불러오기
   const fetchModels = async () => {
@@ -1275,21 +1295,43 @@ function App() {
                     <input type="file" style={{ display: 'none' }} onChange={(e) => processImageFile(e.target.files[0])} disabled={isGenerating} />
                   </label>
 
-                  {/* AI 모델 선택 박스 */}
+                  {/* AI 모델 선택 박스 (Premium Custom Dropdown) */}
                   {availableModels.length > 0 && (
-                    <div className="model-selector-wrapper">
-                      <select 
-                        className="model-select-dropdown"
-                        value={selectedModelId}
-                        onChange={(e) => handleModelChange(e.target.value)}
+                    <div className="model-selector-container" ref={modelSelectorRef}>
+                      <button 
+                        className={`model-selector-trigger ${isModelSelectorOpen ? 'active' : ''}`}
+                        onClick={() => !isGenerating && setIsModelSelectorOpen(!isModelSelectorOpen)}
                         disabled={isGenerating}
                       >
-                        {availableModels.map(model => (
-                          <option key={model.id} value={model.id}>
-                            {model.name}
-                          </option>
-                        ))}
-                      </select>
+                        <Sparkles size={14} className="gemini-icon" />
+                        <span className="selected-model-name">
+                          {availableModels.find(m => m.id === selectedModelId)?.name || 'Model Select'}
+                        </span>
+                        <ChevronDown size={14} className={`arrow-icon ${isModelSelectorOpen ? 'rotated' : ''}`} />
+                      </button>
+
+                      {isModelSelectorOpen && (
+                        <div className="model-selector-popup fade-up-element">
+                          <div className="model-popup-header">AI 모델 선택</div>
+                          <div className="model-popup-list">
+                            {availableModels.map(model => (
+                              <button
+                                key={model.id}
+                                className={`model-item-btn ${selectedModelId === model.id ? 'active' : ''}`}
+                                onClick={() => {
+                                  handleModelChange(model.id);
+                                  setIsModelSelectorOpen(false);
+                                }}
+                              >
+                                <div className="model-item-info">
+                                  <span className="model-name">{model.name}</span>
+                                  {selectedModelId === model.id && <Sparkles size={12} fill="currentColor" />}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
