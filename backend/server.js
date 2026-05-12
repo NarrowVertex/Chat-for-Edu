@@ -6,39 +6,8 @@ const db = require('./db');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-
-// AI 모델 설정 로드
-const modelsConfigPath = path.join(__dirname, 'ai-models.json');
-let availableModels = [];
-if (fs.existsSync(modelsConfigPath)) {
-  availableModels = JSON.parse(fs.readFileSync(modelsConfigPath, 'utf8'));
-}
-
-// 특정 모델 인스턴스를 가져오는 헬퍼 함수
-function getAIInstance(modelId) {
-  const modelConfig = availableModels.find(m => m.id === modelId) || availableModels[0];
-  if (!modelConfig) throw new Error("사용 가능한 AI 모델 설정이 없습니다.");
-  
-  const apiKey = process.env[modelConfig.apiKeyEnv];
-  const genAIInstance = new GoogleGenerativeAI(apiKey);
-  return genAIInstance.getGenerativeModel({ 
-    model: modelConfig.endpoint,
-    generationConfig: {
-      temperature: modelConfig.temperature || 0.7
-    }
-  });
-}
-
-// 이미지 데이터를 Gemini API용 포맷으로 변환하는 함수
-function fileToGenerativePart(path, mimeType) {
-  return {
-    inlineData: {
-      data: Buffer.from(fs.readFileSync(path)).toString("base64"),
-      mimeType,
-    },
-  };
-}
+const aiService = require('./ai-service');
+const availableModels = aiService.availableModels;
 
 // 트리 구조에서 상위 노드들을 추적하여 대화 히스토리를 구성하는 함수
 async function getChatHistory(parentId) {
@@ -58,15 +27,15 @@ async function getChatHistory(parentId) {
     // 1. 모델 답변 (AI)
     if (msg.answer_text) {
       history.push({
-        role: "model",
-        parts: [{ text: msg.answer_text }],
+        role: "assistant",
+        content: msg.answer_text,
       });
     }
     // 2. 사용자 질문 (User)
     if (msg.question_text) {
       history.push({
         role: "user",
-        parts: [{ text: msg.question_text }],
+        content: msg.question_text,
       });
     }
 
@@ -346,11 +315,6 @@ app.post('/api/chats', upload.single('photo'), async (req, res) => {
 [ANSWER] 답변 내용
 한글로 답변하세요.`;
 
-    let parts = [prompt];
-    if (req.file) {
-      parts.push(fileToGenerativePart(req.file.path, req.file.mimetype));
-    }
-
     // 사용자 선호 모델 조회 (model_id가 없을 경우 대비)
     let finalModelId = model_id;
     if (!finalModelId) {
@@ -358,10 +322,11 @@ app.post('/api/chats', upload.single('photo'), async (req, res) => {
       finalModelId = userRows[0]?.preferred_model || availableModels[0]?.id;
     }
 
-    const aiModel = getAIInstance(finalModelId);
-    const result_ai = await aiModel.generateContent(parts);
-    const response_ai = await result_ai.response;
-    const fullText = response_ai.text();
+    const fullText = await aiService.generateResponse(finalModelId, {
+      prompt,
+      imagePath: req.file ? req.file.path : null,
+      mimeType: req.file ? req.file.mimetype : null
+    });
 
     // [TITLE]과 [ANSWER] 파싱
     let aiTitle = text_content.substring(0, 15); // Fallback
@@ -567,21 +532,6 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
 [ANSWER] 답변 내용
 한글로 답변하세요.`;
 
-      // 2. 히스토리와 현재 질문 결합
-      let contents = [...history];
-      
-      let currentPart = { text: prompt };
-      let currentParts = [currentPart];
-      
-      if (req.file) {
-        currentParts.push(fileToGenerativePart(req.file.path, req.file.mimetype));
-      }
-      
-      contents.push({
-        role: "user",
-        parts: currentParts
-      });
-
       // 모델 결정
       let finalModelId = model_id;
       if (!finalModelId) {
@@ -593,11 +543,13 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
         finalModelId = finalModelId || availableModels[0]?.id;
       }
 
-      const aiModel = getAIInstance(finalModelId);
-      // 3. gemini 호출 (generateContent를 사용하여 전체 문맥 전달)
-      const result_ai = await aiModel.generateContent({ contents });
-      const response_ai = await result_ai.response;
-      const fullText = response_ai.text();
+      // 3. AI 호출
+      const fullText = await aiService.generateResponse(finalModelId, {
+        prompt,
+        history,
+        imagePath: req.file ? req.file.path : null,
+        mimeType: req.file ? req.file.mimetype : null
+      });
 
       const titleMatch = fullText.match(/\[TITLE\]\s*(.*)/i);
       const answerMatch = fullText.match(/\[ANSWER\]\s*([\s\S]*)/i);
@@ -659,19 +611,6 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
 [ANSWER] 답변 내용
 한글로 답변하세요.`;
 
-    let contents = [...history];
-    let currentParts = [{ text: prompt }];
-
-    // 사진이 있으면 경로를 찾아 절대 경로로 변환 (멀티모달 복구)
-    if (msg.photo_url) {
-      const photoPath = path.join(__dirname, msg.photo_url);
-      if (fs.existsSync(photoPath)) {
-        currentParts.push(fileToGenerativePart(photoPath, "image/jpeg"));
-      }
-    }
-
-    contents.push({ role: "user", parts: currentParts });
-
     // 모델 결정
     let finalModelId = model_id;
     if (!finalModelId) {
@@ -686,10 +625,12 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
       finalModelId = finalModelId || availableModels[0]?.id;
     }
 
-    const aiModel = getAIInstance(finalModelId);
-    const result_ai = await aiModel.generateContent({ contents });
-    const response_ai = await result_ai.response;
-    const fullText = response_ai.text();
+    const fullText = await aiService.generateResponse(finalModelId, {
+      prompt,
+      history,
+      imagePath: msg.photo_url ? path.join(__dirname, msg.photo_url) : null,
+      mimeType: "image/jpeg" // Assuming jpeg for stored photos
+    });
 
     const titleMatch = fullText.match(/\[TITLE\]\s*(.*)/i);
     const answerMatch = fullText.match(/\[ANSWER\]\s*([\s\S]*)/i);

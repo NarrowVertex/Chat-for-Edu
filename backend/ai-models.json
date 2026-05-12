@@ -2,6 +2,7 @@
   {
     "id": "gemini-2.5-flash",
     "name": "Gemini 2.5 Flash",
+    "provider": "google",
     "endpoint": "gemini-2.5-flash",
     "temperature": 0.7,
     "apiKeyEnv": "GEMINI_API_KEY"
@@ -9,6 +10,7 @@
   {
     "id": "gemini-3-flash",
     "name": "Gemini 3 Flash",
+    "provider": "google",
     "endpoint": "gemini-3-flash-preview",
     "temperature": 0.7,
     "apiKeyEnv": "GEMINI_API_KEY"
@@ -16,6 +18,7 @@
   {
     "id": "gemini-3.1-pro",
     "name": "Gemini 3.1 Pro",
+    "provider": "google",
     "endpoint": "gemini-3.1-pro-preview",
     "temperature": 0.7,
     "apiKeyEnv": "GEMINI_API_KEY"
@@ -23,8 +26,27 @@
   {
     "id": "gemini-3.1-flash-lite",
     "name": "Gemini 3.1 Flash-Lite",
+    "provider": "google",
     "endpoint": "gemini-3.1-flash-lite-preview",
     "temperature": 0.7,
     "apiKeyEnv": "GEMINI_API_KEY"
+  },
+  {
+    "id": "gpt-4o",
+    "name": "GPT-4o (OpenAI)",
+    "provider": "openai",
+    "endpoint": "gpt-4o",
+    "temperature": 0.7,
+    "apiKeyEnv": "OPENAI_API_KEY"
+  },
+  {
+    "id": "mercury-2",
+    "name": "Mercury 2",
+    "provider": "custom",
+    "url": "https://api.inceptionlabs.ai/v1/chat/completions",
+    "endpoint": "mercury-2",
+    "temperature": 0.7,
+    "apiKeyEnv": "INCEPTION_API_KEY",
+    "responsePath": "choices[0].message.content"
   }
 ]
