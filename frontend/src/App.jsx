@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import {
   Menu, Plus, Compass, Sparkles, Mic, Paperclip, MessageSquare, MessageCircle, X,
   ArrowLeft, Search, Share2, Star, Edit3, RotateCcw, ThumbsUp, ThumbsDown,
-  MoreVertical, ChevronRight, ChevronDown, Hash, Send, ExternalLink, CornerDownRight, SquarePlus, Trash2, Loader2, Bell, Check
+  MoreVertical, ChevronRight, ChevronDown, Hash, Send, ExternalLink, CornerDownRight, SquarePlus, Trash2, Loader2, Bell, Check,
+  Pencil, Highlighter, Eraser, Type, FileText
 } from 'lucide-react';
 import './App.css';
 import ReactMarkdown from 'react-markdown';
@@ -44,6 +45,7 @@ function App() {
   const [contextNode, setContextNode] = useState(null);
   const [isContextSelectorOpen, setIsContextSelectorOpen] = useState(false);
   const [collapsedNodes, setCollapsedNodes] = useState(new Set()); // 접힌 노드 ID 목록
+  const [isNodeModalOpen, setIsNodeModalOpen] = useState(false);
 
   const toggleCollapse = (nodeId, e) => {
     e.stopPropagation(); // 노드 선택 이벤트 방지
@@ -56,6 +58,20 @@ function App() {
   };
 
   const [nodeListTab, setNodeListTab] = useState('category'); // 'category' | 'score' | 'favorite'
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  // 메인 로비 전역 검색 상태
+  const [lobbySearchQuery, setLobbySearchQuery] = useState('');
+  const [lobbySearchResults, setLobbySearchResults] = useState([]);
+  const [isLobbySearching, setIsLobbySearching] = useState(false);
+  const [pendingNodeId, setPendingNodeId] = useState(null);
+  
+  // 정리본(PDF 요약집) 상태
+  const [compiledSummary, setCompiledSummary] = useState({
+    mainNodes: [],
+    appendixNodes: [],
+    isCompiled: false
+  });
 
   // Chat Input State
   const [inputText, setInputText] = useState('');
@@ -78,6 +94,16 @@ function App() {
 
   // Smart Icon Toggle States
   const [activeIcons, setActiveIcons] = useState({ next: false, node: false, sparkle: false });
+
+  // Drawing State
+  const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [drawingTool, setDrawingTool] = useState('pen'); // 'pen', 'highlighter', 'eraser'
+  const [penColor, setPenColor] = useState('#ffffff');
+  const [highlighterColor, setHighlighterColor] = useState('#ffff00');
+  const [activeColorPicker, setActiveColorPicker] = useState(null); // 'pen' | 'highlighter' | null
+  const [drawings, setDrawings] = useState([]);
+
+  const PRESET_COLORS = ['#ffffff', '#ff4757', '#ffa502', '#2ed573', '#1e90ff', '#3742fa', '#ff6b81', '#ffff00', '#00ffff', '#a4b0be'];
 
   // Login State
   const [loginId, setLoginId] = useState('');
@@ -572,6 +598,12 @@ function App() {
     }
   }, [currentUser]);
 
+  // 프로젝트 변경 또는 뷰 모드(채팅/노드/퀴즈) 변경 시 필기 모드 해제
+  useEffect(() => {
+    setIsDrawingMode(false);
+    setActiveColorPicker(null);
+  }, [activeChat?.id, viewMode]);
+
   // 로그인된 사용자별로 localStorage에서 노드 모드 viewport 복원
   // 로그아웃하거나 다른 계정으로 바꾸면 이전 사용자의 viewport는 메모리에서 제거됨
   useEffect(() => {
@@ -628,10 +660,51 @@ function App() {
 
   useEffect(() => {
     if (activeChat) {
-      fetchNodes(activeChat.id);
+      const targetNodeId = pendingNodeId;
+      fetchNodes(activeChat.id, targetNodeId);
+      if (targetNodeId) {
+        setPendingNodeId(null);
+      }
       fetchQuizzes(activeChat.id);
     }
   }, [activeChat]);
+
+  // 전역 검색 API 호출 Effect
+  useEffect(() => {
+    if (!currentUser || !lobbySearchQuery || lobbySearchQuery.trim() === '') {
+      setLobbySearchResults([]);
+      return;
+    }
+    
+    const timeoutId = setTimeout(async () => {
+      setIsLobbySearching(true);
+      try {
+        const res = await fetch(`http://localhost:5000/api/search/${currentUser.id}?q=${encodeURIComponent(lobbySearchQuery.trim())}`);
+        if (res.ok) {
+          const data = await res.json();
+          setLobbySearchResults(data);
+        }
+      } catch (err) {
+        console.error("Global search error:", err);
+      } finally {
+        setIsLobbySearching(false);
+      }
+    }, 300);
+    
+    return () => clearTimeout(timeoutId);
+  }, [lobbySearchQuery, currentUser]);
+
+  const handleGlobalSearchResultClick = async (result) => {
+    const chatItem = historyItems.find(item => String(item.id) === String(result.chatId)) || { id: result.chatId, title: result.chatTitle };
+    
+    if (result.type === 'chat') {
+      enterProject(chatItem);
+    } else if (result.type === 'node') {
+      setPendingNodeId(result.nodeId);
+      enterProject(chatItem);
+      setViewMode('node'); // 노드 뷰 모드로 전환하여 해당 블록을 바로 볼 수 있게 함
+    }
+  };
 
   useEffect(() => {
     // 사용자가 현재 보고 있는 노드를 기본 컨텍스트(부모)로 설정
@@ -713,12 +786,47 @@ function App() {
     setNodes([]); // 이전 프로젝트 노드 비우기
     setSelectedNode(null); // 선택된 노드 초기화
     setQuizList([]); // 이전 프로젝트 퀴즈 목록 비우기
+    setDrawings([]); // 이전 프로젝트 필기 비우기
+    setIsDrawingMode(false); // 필기 모드 초기화
+    setCompiledSummary({ mainNodes: [], appendixNodes: [], isCompiled: false });
     
     // 2. 새 프로젝트 정보 설정
     setActiveChat(chat);
     
-    // 3. 새 프로젝트 세션 복구
+    // 3. 서버에서 최신 드로잉 데이터 가져오기 (사이드바 데이터가 stale할 수 있으므로)
+    const syncDrawings = async () => {
+      try {
+        const response = await fetch(`http://localhost:5000/api/chats/detail/${chat.id}`);
+        if (response.ok) {
+          const freshChat = await response.json();
+          if (freshChat.drawings) {
+            setDrawings(JSON.parse(freshChat.drawings));
+          } else {
+            setDrawings([]);
+          }
+          // 로컬 데이터도 최신화
+          setActiveChat(freshChat);
+        } else {
+          // 실패 시 기존 데이터 사용
+          if (chat.drawings) {
+            setDrawings(JSON.parse(chat.drawings));
+          } else {
+            setDrawings([]);
+          }
+        }
+      } catch (err) {
+        console.error('Sync drawings error:', err);
+        if (chat.drawings) {
+          setDrawings(JSON.parse(chat.drawings));
+        } else {
+          setDrawings([]);
+        }
+      }
+    };
+
+    // 4. 새 프로젝트 세션 복구
     restoreSession(chat.id);
+    syncDrawings();
     
     setView('project');
   };
@@ -730,7 +838,87 @@ function App() {
     setActiveChat(null);
     setNodes([]);
     setSelectedNode(null);
+    setViewMode('chat'); // 홈으로 나갈 때 뷰 모드 초기화
     setView('home');
+    setCompiledSummary({ mainNodes: [], appendixNodes: [], isCompiled: false });
+  };
+
+  const handleGenerateSummary = () => {
+    // 1. M 본문 그룹 추출 (라벨이 M으로 시작하면서 -S가 없는 메인 노드들)
+    const mNodes = nodes.filter(n => n.node_label?.startsWith('M') && !n.node_label?.includes('-S'));
+    // 자연스러운 번호 순서로 정렬 (예: M1-1, M2-1, M10-1)
+    mNodes.sort((a, b) => (a.node_label || '').localeCompare(b.node_label || '', undefined, { numeric: true }));
+
+    const mainResult = [];
+    const handledIds = new Set();
+
+    mNodes.forEach(mNode => {
+      mainResult.push({ ...mNode, isSubNode: false });
+      handledIds.add(mNode.id);
+
+      // 해당 M 노드 바로 뒤에 파생 하위 S 노드들 밀착 배치
+      if (mNode.node_label) {
+        const sChildNodes = nodes.filter(n => 
+          n.node_label?.startsWith(`${mNode.node_label}-S`)
+        );
+        sChildNodes.sort((a, b) => (a.node_label || '').localeCompare(b.node_label || '', undefined, { numeric: true }));
+        
+        sChildNodes.forEach(sNode => {
+          if (!handledIds.has(sNode.id)) {
+            mainResult.push({ ...sNode, isSubNode: true });
+            handledIds.add(sNode.id);
+          }
+        });
+      }
+    });
+
+    // 부모 매칭이 안 된 나머지 M 계열 노드나 예외 노드 중복 방지 처리
+    nodes.forEach(n => {
+      if (!handledIds.has(n.id) && !n.node_label?.startsWith('B')) {
+        const isSub = n.node_label?.includes('-S');
+        mainResult.push({ ...n, isSubNode: isSub });
+        handledIds.add(n.id);
+      }
+    });
+
+    // 2. B 부록 그룹 추출 (라벨이 B로 시작하면서 -S가 없는 브랜치 노드들)
+    const bNodes = nodes.filter(n => n.node_label?.startsWith('B') && !n.node_label?.includes('-S'));
+    bNodes.sort((a, b) => (a.node_label || '').localeCompare(b.node_label || '', undefined, { numeric: true }));
+
+    const appendixResult = [];
+    bNodes.forEach(bNode => {
+      appendixResult.push({ ...bNode, isSubNode: false });
+      handledIds.add(bNode.id);
+
+      if (bNode.node_label) {
+        const bChildNodes = nodes.filter(n => 
+          n.node_label?.startsWith(`${bNode.node_label}-S`)
+        );
+        bChildNodes.sort((a, b) => (a.node_label || '').localeCompare(b.node_label || '', undefined, { numeric: true }));
+        
+        bChildNodes.forEach(sNode => {
+          if (!handledIds.has(sNode.id)) {
+            appendixResult.push({ ...sNode, isSubNode: true });
+            handledIds.add(sNode.id);
+          }
+        });
+      }
+    });
+
+    // 남은 B 계열 노드 처리
+    nodes.forEach(n => {
+      if (n.node_label?.startsWith('B') && !handledIds.has(n.id)) {
+        const isSub = n.node_label?.includes('-S');
+        appendixResult.push({ ...n, isSubNode: isSub });
+        handledIds.add(n.id);
+      }
+    });
+
+    setCompiledSummary({
+      mainNodes: mainResult,
+      appendixNodes: appendixResult,
+      isCompiled: true
+    });
   };
 
   const handleRegister = async () => {
@@ -1238,7 +1426,7 @@ function App() {
 
   return (
     <div 
-      className="app-container"
+      className={`app-container mode-${viewMode} view-${view}`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -1266,15 +1454,14 @@ function App() {
               <div className="header-top">
                 <button className="icon-button" onClick={exitProject}><ArrowLeft size={20} /></button>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  <button className="icon-button"><Search size={20} /></button>
-                  <button className="icon-button trash-btn" onClick={() => setIsDeleteProjectModalOpen(true)}>
-                    <Trash2 size={18} />
-                  </button>
                   <button className="icon-button" onClick={() => {
                     setIsEditingTitle(true);
                     setEditedTitle(activeChat?.title || '');
                   }}>
                     <Edit3 size={18} />
+                  </button>
+                  <button className="icon-button trash-btn" onClick={() => setIsDeleteProjectModalOpen(true)}>
+                    <Trash2 size={18} />
                   </button>
                 </div>
               </div>
@@ -1310,6 +1497,10 @@ function App() {
                 <div className="view-mode-icon"><MessageCircle size={20} /></div>
                 <span>quiz</span>
               </button>
+              <button className={`view-mode-btn ${viewMode === 'summary' ? 'active' : ''}`} onClick={() => setViewMode('summary')}>
+                <div className="view-mode-icon"><FileText size={20} /></div>
+                <span>정리본</span>
+              </button>
             </div>
 
             <div className="node-list-tabs">
@@ -1327,8 +1518,65 @@ function App() {
               >즐겨찾기</span>
             </div>
 
+            <div className="node-search-bar" style={{ padding: '0 16px 12px 16px' }}>
+               <div style={{ position: 'relative' }}>
+                 <input 
+                   type="text" 
+                   placeholder="검색어를 입력하세요..." 
+                   value={searchQuery}
+                   onChange={(e) => setSearchQuery(e.target.value)}
+                   style={{ 
+                     width: '100%', 
+                     padding: '8px 12px 8px 32px', 
+                     borderRadius: '8px', 
+                     border: '1px solid rgba(255, 255, 255, 0.1)', 
+                     backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                     color: '#fff',
+                     fontSize: '14px',
+                     boxSizing: 'border-box'
+                   }}
+                 />
+                 <Search size={16} color="#888" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
+                 {searchQuery && (
+                   <button 
+                     onClick={() => setSearchQuery('')}
+                     style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '0', display: 'flex' }}
+                   >
+                     <X size={14} color="#888" />
+                   </button>
+                 )}
+               </div>
+            </div>
+
             <div className="nodes-container">
-              {nodeListTab === 'score' ? (
+              {searchQuery ? (
+                <div className="search-results-view">
+                  {(() => {
+                    const lowerQuery = searchQuery.toLowerCase();
+                    const filteredNodes = nodes.filter(n => 
+                      (n.node_title && n.node_title.toLowerCase().includes(lowerQuery)) ||
+                      (n.question_text && n.question_text.toLowerCase().includes(lowerQuery)) ||
+                      (n.answer_text && n.answer_text.toLowerCase().includes(lowerQuery))
+                    );
+                    
+                    if (filteredNodes.length === 0) {
+                      return <div className="score-group-empty" style={{ padding: '20px', textAlign: 'center' }}>검색 결과가 없습니다</div>;
+                    }
+                    
+                    return filteredNodes.map(node => (
+                      <button
+                        key={node.id}
+                        className={`node-item ${selectedNode?.id === node.id ? 'selected' : ''}`}
+                        onClick={() => setSelectedNode(node)}
+                      >
+                        <div className={`node-tag ${getTagColorClass(node.node_label)}`} title={node.node_label}>{getDisplayLabel(node.node_label)}</div>
+                        <div className="node-item-title">{node.node_title}</div>
+                        <ChevronRight size={14} color="#555" />
+                      </button>
+                    ));
+                  })()}
+                </div>
+              ) : nodeListTab === 'score' ? (
                 /* 이해도 그룹 뷰 */
                 <div className="score-group-view">
                   {[1, 2, 3, 4, 5].map(score => {
@@ -1454,7 +1702,82 @@ function App() {
               <button className="icon-button" onClick={() => setIsSidebarOpen(!isSidebarOpen)}><Menu size={24} /></button>
             </div>
             <div className="sidebar-content">
-              <button className="new-chat-button" onClick={() => { setView('home'); setActiveChat(null); }}>
+              <div className="lobby-search-bar" style={{ padding: '0 12px 12px 12px' }}>
+                <div style={{ position: 'relative' }}>
+                  <input 
+                    type="text" 
+                    placeholder="프로젝트 및 블록 검색..." 
+                    value={lobbySearchQuery}
+                    onChange={(e) => setLobbySearchQuery(e.target.value)}
+                    style={{ 
+                      width: '100%', 
+                      padding: '8px 12px 8px 32px', 
+                      borderRadius: '8px', 
+                      border: '1px solid rgba(255, 255, 255, 0.1)', 
+                      backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                      color: '#fff',
+                      fontSize: '14px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                  <Search size={16} color="#888" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
+                  {lobbySearchQuery && (
+                    <button 
+                      onClick={() => setLobbySearchQuery('')}
+                      style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '0', display: 'flex' }}
+                    >
+                      <X size={14} color="#888" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {lobbySearchQuery ? (
+                <div className="lobby-search-results" style={{ overflowY: 'auto', flex: 1, padding: '0 12px' }}>
+                  {isLobbySearching ? (
+                    <div style={{ padding: '20px', textAlign: 'center', color: '#888', fontSize: '13px' }}>
+                      <Loader2 size={16} className="spinning-icon" style={{ display: 'inline-block', marginRight: '8px' }} />
+                      검색 중...
+                    </div>
+                  ) : lobbySearchResults.length === 0 ? (
+                    <div style={{ padding: '20px', textAlign: 'center', color: '#888', fontSize: '13px' }}>
+                      검색 결과가 없습니다
+                    </div>
+                  ) : (
+                    lobbySearchResults.map((result) => (
+                      <div 
+                        key={result.id}
+                        onClick={() => handleGlobalSearchResultClick(result)}
+                        style={{ 
+                          padding: '10px', 
+                          borderRadius: '8px', 
+                          cursor: 'pointer', 
+                          marginBottom: '8px',
+                          backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                          border: '1px solid rgba(255, 255, 255, 0.05)',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)'}
+                      >
+                        <div style={{ fontSize: '13px', fontWeight: 'bold', color: result.type === 'chat' ? '#4285f4' : '#e0e0e0', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                          {result.type === 'chat' ? '📁' : '📄'}
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {result.type === 'chat' ? result.title : `[${result.chatTitle}] ${result.title}`}
+                          </span>
+                        </div>
+                        {result.snippet && (
+                          <div style={{ fontSize: '12px', color: '#aaa', lineHeight: '1.4', wordBreak: 'break-word', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                            {result.snippet}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              ) : (
+                <>
+                  <button className="new-chat-button" onClick={() => { setView('home'); setActiveChat(null); }}>
                 <Plus size={20} />
                 <span>새 채팅</span>
               </button>
@@ -1501,6 +1824,8 @@ function App() {
                   </div>
                 ))}
               </div>
+              </>
+              )}
             </div>
           </div>
         )}
@@ -1612,25 +1937,122 @@ function App() {
           ) : (
             /* 노드 상세 화면 (Project View) */
             viewMode === 'node' ? (
-              <div style={{
-                position: 'absolute',
-                top: 0, left: 0, right: 0, bottom: 0,
-                zIndex: 1,
-              }}>
-                <NodeTreeView
-                  nodes={nodes}
-                  selectedNode={selectedNode}
-                  onNodeClick={(node) => setSelectedNode(node)}
-                  onDoubleClickNode={(node) => {
-                    setSelectedNode(node);
-                    setViewMode('chat');
-                  }}
-                  onUpdateMetadata={updateNodeMetadata}
-                  onDeleteNode={() => setIsDeleteNodeModalOpen(true)}
-                  onConnectEdge={handleConnectEdge}
-                  savedViewport={activeChat ? projectSessionMap[activeChat.id]?.viewport : undefined}
-                  onViewportChange={handleNodeViewportChange}
-                />
+              <div className="node-view-split fade-in">
+                <div className="node-graph-area">
+                  <NodeTreeView
+                    nodes={nodes}
+                    selectedNode={selectedNode}
+                    onNodeClick={(node) => setSelectedNode(node)}
+                    onDoubleClickNode={(node) => {
+                      setSelectedNode(node);
+                      setIsNodeModalOpen(true);
+                    }}
+                    onUpdateMetadata={updateNodeMetadata}
+                    onDeleteNode={() => setIsDeleteNodeModalOpen(true)}
+                    onConnectEdge={handleConnectEdge}
+                    savedViewport={activeChat ? projectSessionMap[activeChat.id]?.viewport : undefined}
+                    onViewportChange={handleNodeViewportChange}
+                    isDrawingMode={isDrawingMode}
+                    drawingTool={drawingTool}
+                    penColor={penColor}
+                    highlighterColor={highlighterColor}
+                    drawings={drawings}
+                    setDrawings={setDrawings}
+                    onSaveDrawings={async (newDrawings) => {
+                      if (!activeChat) return;
+                      try {
+                        await fetch(`http://localhost:5000/api/chats/${activeChat.id}/drawings`, {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ drawings: JSON.stringify(newDrawings) })
+                        });
+                        // update activeChat local ref
+                        const drawingsStr = JSON.stringify(newDrawings);
+                        setActiveChat(prev => ({ ...prev, drawings: drawingsStr }));
+                        
+                        // 사이드바 목록(historyItems)도 동기화하여 프로젝트 전환 시 데이터 유지
+                        setHistoryItems(prev => prev.map(item => 
+                          String(item.id) === String(activeChat.id) 
+                            ? { ...item, drawings: drawingsStr } 
+                            : item
+                        ));
+                      } catch (err) {
+                        console.error('Failed to save drawings:', err);
+                      }
+                    }}
+                  />
+                </div>
+
+                {/* 우측 패널 (메시지 형태) */}
+                {isNodeModalOpen && selectedNode && (
+                  <div className="node-right-panel">
+                    <div className="panel-header">
+                      <div>
+                        <div className={`node-tag ${getTagColorClass(selectedNode.node_label)}`}>
+                          {getDisplayLabel(selectedNode.node_label)}
+                        </div>
+                        {isEditingNodeTitle ? (
+                          <div className="title-edit-container">
+                            <input
+                              type="text"
+                              className="title-edit-input"
+                              value={editedNodeTitle}
+                              onChange={(e) => setEditedNodeTitle(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleNodeTitleUpdate();
+                                if (e.key === 'Escape') setIsEditingNodeTitle(false);
+                              }}
+                              autoFocus
+                            />
+                            <div className="title-edit-actions">
+                              <button onClick={handleNodeTitleUpdate}><Check size={16} /></button>
+                              <button onClick={() => setIsEditingNodeTitle(false)}><X size={16} /></button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="editable-title-wrapper">
+                            <h3>{selectedNode.node_title || '(제목 없음)'}</h3>
+                            <button 
+                              className="edit-title-btn" 
+                              onClick={() => {
+                                setEditedNodeTitle(selectedNode.node_title);
+                                setIsEditingNodeTitle(true);
+                              }}
+                              title="제목 수정"
+                            >
+                              <Edit3 size={16} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <button className="panel-close-btn" onClick={() => setIsNodeModalOpen(false)}>
+                        <X size={24} />
+                      </button>
+                    </div>
+                    
+                    <div className="panel-scroll-area">
+                      {/* 질문 (사용자 말풍선) */}
+                      <div className="panel-message user">
+                        <span className="panel-message-label">{selectedNode.node_type === 'content' ? '메모' : '질문'}</span>
+                        <div className="panel-bubble">
+                          {selectedNode.question_text}
+                        </div>
+                      </div>
+
+                      {/* 답변 (AI 말풍선) */}
+                      {selectedNode.node_type !== 'content' && selectedNode.answer_text && (
+                        <div className="panel-message ai">
+                          <span className="panel-message-label">AI 답변</span>
+                          <div className="panel-bubble">
+                            <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                              {sanitizeMarkdown(selectedNode.answer_text)}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : viewMode === 'quiz' ? (
               <div className="quiz-container fade-up-element">
@@ -2052,6 +2474,90 @@ function App() {
                   </div>
                 )}
               </div>
+            ) : viewMode === 'summary' ? (
+              <div className="summary-view-container fade-up-element">
+                <div className="summary-header">
+                  <div className="summary-title">
+                    <FileText size={20} color="#4285f4" />
+                    <span>{activeChat?.title} 정리본 PDF 생성하기</span>
+                  </div>
+                  <div className="summary-actions">
+                    <button className="summary-btn generate" onClick={handleGenerateSummary}>
+                      <RotateCcw size={14} />
+                      <span>생성하기</span>
+                    </button>
+                    {compiledSummary.isCompiled && (
+                      <button className="summary-btn download" onClick={() => {
+                        const prevTitle = document.title;
+                        document.title = `${activeChat?.title || '정리본'} - 정리본`;
+                        setTimeout(() => {
+                          window.print();
+                          setTimeout(() => { document.title = prevTitle; }, 1000);
+                        }, 100);
+                      }}>
+                        <FileText size={14} />
+                        <span>다운로드</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="summary-preview-wrapper">
+                  {!compiledSummary.isCompiled ? (
+                    <div className="summary-empty-state">
+                      <FileText size={48} color="#4285f4" style={{ opacity: 0.5, margin: '0 auto 16px auto', display: 'block' }} />
+                      <h3 style={{ marginBottom: '8px', color: '#fff' }}>정리본이 아직 생성되지 않았습니다.</h3>
+                      <p style={{ fontSize: '14px' }}>상단의 <b>생성하기</b> 버튼을 눌러 현재 프로젝트의 질문과 답변을 요약본으로 구성하세요.</p>
+                    </div>
+                  ) : (
+                    <div className="summary-paper-preview">
+                      <div className="paper-cover-title">{activeChat?.title} 요약 정리본</div>
+                      <div className="paper-meta">작성자: {currentUser?.user_id} | 추출 일시: {new Date().toLocaleDateString()}</div>
+
+                      {/* 본문 (M + S 파생) */}
+                      {compiledSummary.mainNodes.length === 0 ? (
+                        <div style={{ color: '#888', fontStyle: 'italic', marginBottom: '40px' }}>본문 항목이 없습니다.</div>
+                      ) : (
+                        compiledSummary.mainNodes.map((n) => (
+                          <div key={n.id} className={`summary-block ${n.isSubNode ? 'sub-block' : ''}`}>
+                            <div className="block-title">
+                              {n.isSubNode && <span className="sub-node-tag" style={{ color: '#3b82f6', fontWeight: 'bold', marginRight: '6px' }}>[추가 설명]</span>}
+                              {n.node_title || sanitizeMarkdown(n.answer_text).split('\n')[0].replace(/^[#*\s]+/, '') || '(제목 없음)'}
+                            </div>
+                            <div className="block-content">
+                              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                {sanitizeMarkdown(n.answer_text)}
+                              </ReactMarkdown>
+                            </div>
+                          </div>
+                        ))
+                      )}
+
+                      {/* 부록 (B + S 파생) */}
+                      {compiledSummary.appendixNodes.length > 0 && (
+                        <div className="appendix-divider">
+                          <div className="appendix-title" style={{ borderBottom: '2px solid #3b82f6', color: '#1e3a8a', paddingBottom: '6px', marginTop: '40px', marginBottom: '20px', fontSize: '18px', fontWeight: 'bold' }}>
+                            [부록] 추가 탐구 및 파생 질문
+                          </div>
+                          {compiledSummary.appendixNodes.map((n) => (
+                            <div key={n.id} className={`summary-block ${n.isSubNode ? 'sub-block' : ''}`}>
+                              <div className="block-title">
+                                {n.isSubNode && <span className="sub-node-tag" style={{ color: '#3b82f6', fontWeight: 'bold', marginRight: '6px' }}>[추가 설명]</span>}
+                                {n.node_title || sanitizeMarkdown(n.answer_text).split('\n')[0].replace(/^[#*\s]+/, '') || '(제목 없음)'}
+                              </div>
+                              <div className="block-content">
+                                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                  {sanitizeMarkdown(n.answer_text)}
+                                </ReactMarkdown>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             ) : (
               <div className="node-detail-container fade-up-element">
                 {selectedNode ? (
@@ -2179,15 +2685,140 @@ function App() {
         </section>
 
         {/* 공통 입력창 영역 */}
-        {viewMode !== 'quiz' && (
-          <div className="input-area-wrapper">
+        {viewMode !== 'quiz' && viewMode !== 'summary' && (
+          <div className={`input-area-wrapper ${isNodeModalOpen && viewMode === 'node' ? 'panel-open' : ''}`}>
             {imagePreviewUrl && (
               <div className="image-preview-container">
                 <div className="preview-bubble"><img src={imagePreviewUrl} alt="p" /><button className="remove-image-btn" onClick={clearImage}><X size={14} /></button></div>
               </div>
             )}
 
-            <div className={`input-container ${isGenerating ? 'disabled' : ''}`}>
+            <div className="input-area-content" style={{ width: '100%', maxWidth: '800px', display: 'flex', flexDirection: 'column' }}>
+              {/* 좌측 상단 필기 모드 (노드 모드 전용) */}
+              {viewMode === 'node' && (
+                <div className="drawing-toolbar-wrapper" style={{ alignSelf: 'flex-start', marginLeft: '16px' }}>
+                  <div className="drawing-tools-bar">
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <button 
+                        className={`tool-btn ${isDrawingMode && drawingTool === 'pen' ? 'active' : ''}`} 
+                        onClick={() => {
+                          if (activeColorPicker === 'pen') {
+                            setActiveColorPicker(null);
+                            setIsDrawingMode(false);
+                          } else {
+                            setIsDrawingMode(true);
+                            setDrawingTool('pen');
+                            setActiveColorPicker('pen');
+                          }
+                        }} 
+                        title="펜 (클릭하여 색상 선택)"
+                      >
+                        <Pencil size={18} style={{ color: penColor }} />
+                      </button>
+                      {activeColorPicker === 'pen' && (
+                        <div style={{
+                          position: 'absolute', bottom: '100%', left: 0, marginBottom: '8px',
+                          background: 'rgba(25, 28, 35, 0.95)', padding: '10px', borderRadius: '16px',
+                          display: 'flex', flexWrap: 'wrap', width: '150px', gap: '8px', border: '1px solid rgba(255, 255, 255, 0.15)',
+                          boxShadow: '0 -8px 24px rgba(0,0,0,0.4)', zIndex: 1000,
+                          backdropFilter: 'blur(10px)'
+                        }}>
+                          {PRESET_COLORS.map(color => (
+                            <div 
+                              key={color}
+                              onClick={() => { setPenColor(color); setActiveColorPicker(null); }}
+                              style={{
+                                width: '22px', height: '22px', borderRadius: '50%', backgroundColor: color,
+                                cursor: 'pointer', border: penColor === color ? '2px solid #fff' : '1px solid rgba(255,255,255,0.2)',
+                                boxShadow: penColor === color ? '0 0 8px rgba(255,255,255,0.5)' : 'none',
+                                transition: 'all 0.2s'
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <button 
+                        className={`tool-btn ${isDrawingMode && drawingTool === 'highlighter' ? 'active' : ''}`} 
+                        onClick={() => {
+                          if (activeColorPicker === 'highlighter') {
+                            setActiveColorPicker(null);
+                            setIsDrawingMode(false);
+                          } else {
+                            setIsDrawingMode(true);
+                            setDrawingTool('highlighter');
+                            setActiveColorPicker('highlighter');
+                          }
+                        }} 
+                        title="형광펜 (클릭하여 색상 선택)"
+                      >
+                        <Highlighter size={18} style={{ color: highlighterColor }} />
+                      </button>
+                      {activeColorPicker === 'highlighter' && (
+                        <div style={{
+                          position: 'absolute', bottom: '100%', left: 0, marginBottom: '8px',
+                          background: 'rgba(25, 28, 35, 0.95)', padding: '10px', borderRadius: '16px',
+                          display: 'flex', flexWrap: 'wrap', width: '150px', gap: '8px', border: '1px solid rgba(255, 255, 255, 0.15)',
+                          boxShadow: '0 -8px 24px rgba(0,0,0,0.4)', zIndex: 1000,
+                          backdropFilter: 'blur(10px)'
+                        }}>
+                          {PRESET_COLORS.map(color => (
+                            <div 
+                              key={color}
+                              onClick={() => { setHighlighterColor(color); setActiveColorPicker(null); }}
+                              style={{
+                                width: '22px', height: '22px', borderRadius: '50%', backgroundColor: color,
+                                cursor: 'pointer', border: highlighterColor === color ? '2px solid #fff' : '1px solid rgba(255,255,255,0.2)',
+                                boxShadow: highlighterColor === color ? '0 0 8px rgba(255,255,255,0.5)' : 'none',
+                                opacity: 0.8,
+                                transition: 'all 0.2s'
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button 
+                      className={`tool-btn ${isDrawingMode && drawingTool === 'eraser' ? 'active' : ''}`} 
+                      onClick={() => {
+                        setActiveColorPicker(null); // 다른 색상 창 닫기
+                        if (drawingTool === 'eraser' && isDrawingMode) {
+                          setIsDrawingMode(false);
+                        } else {
+                          setIsDrawingMode(true);
+                          setDrawingTool('eraser');
+                        }
+                      }} 
+                      title="지우개"
+                    >
+                      <Eraser size={18} />
+                    </button>
+                    <div className="tool-divider" />
+                    <button 
+                      className="tool-btn" 
+                      onClick={() => {
+                        if(window.confirm('모든 필기를 지우시겠습니까?')) {
+                          setDrawings([]);
+                          if (activeChat) {
+                            fetch(`http://localhost:5000/api/chats/${activeChat.id}/drawings`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ drawings: JSON.stringify([]) })
+                            });
+                          }
+                        }
+                      }} 
+                      title="전체 삭제"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                </div>
+              )}
+              
+              <div className={`input-container ${isGenerating ? 'disabled' : ''}`}>
               <textarea
                 ref={textareaRef}
                 className="input-field"
@@ -2245,6 +2876,8 @@ function App() {
                         </button>
                       </div>
 
+
+
                       {selectedNode && (
                         <>
                           <button
@@ -2288,7 +2921,8 @@ function App() {
               </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
         {/* 계정 탈퇴 확인 모달 */}
         {isDeleteModalOpen && (
