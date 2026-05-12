@@ -334,6 +334,84 @@ app.get('/api/chats/:userId', async (req, res) => {
   }
 });
 
+// 전역 검색 API
+app.get('/api/search/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const query = req.query.q;
+    
+    if (!query || query.trim() === '') return res.json([]);
+    
+    const searchPattern = `%${query}%`;
+    const results = [];
+
+    // 1. 프로젝트 매칭 (Chats 테이블)
+    const [chats] = await db.execute(
+      'SELECT id, title FROM Chats WHERE owner_id = ? AND title LIKE ? ORDER BY updated_at DESC',
+      [userId, searchPattern]
+    );
+    
+    chats.forEach(chat => {
+      results.push({
+        type: 'chat',
+        chatId: chat.id,
+        chatTitle: chat.title,
+        id: `chat-${chat.id}`,
+        title: chat.title,
+        snippet: ''
+      });
+    });
+
+    // 2. 블록(노드) 매칭 (Messages 테이블 JOIN Chats 테이블)
+    const [nodes] = await db.execute(`
+      SELECT m.id as node_id, m.chat_id, c.title as chat_title, m.node_title, m.question_text, m.answer_text
+      FROM Messages m
+      JOIN Chats c ON m.chat_id = c.id
+      WHERE c.owner_id = ? AND (
+        m.node_title LIKE ? OR 
+        m.question_text LIKE ? OR 
+        m.answer_text LIKE ?
+      )
+      ORDER BY m.created_at DESC
+      LIMIT 30
+    `, [userId, searchPattern, searchPattern, searchPattern]);
+
+    nodes.forEach(node => {
+      let snippet = '';
+      const lowerQuery = query.toLowerCase();
+      const fields = [node.node_title || '', node.question_text || '', node.answer_text || ''];
+      
+      for (const text of fields) {
+        const lowerText = text.toLowerCase();
+        const idx = lowerText.indexOf(lowerQuery);
+        if (idx !== -1) {
+          const start = Math.max(0, idx - 20);
+          const end = Math.min(text.length, idx + query.length + 20);
+          snippet = text.substring(start, end).replace(/\n/g, ' ');
+          if (start > 0) snippet = '...' + snippet;
+          if (end < text.length) snippet = snippet + '...';
+          break;
+        }
+      }
+
+      results.push({
+        type: 'node',
+        chatId: node.chat_id,
+        chatTitle: node.chat_title,
+        id: `node-${node.node_id}`,
+        nodeId: node.node_id,
+        title: node.node_title || '(제목 없음)',
+        snippet: snippet
+      });
+    });
+
+    res.json(results);
+  } catch (error) {
+    console.error("Global Search Error:", error);
+    res.status(500).json({ error: "검색 중 오류가 발생했습니다." });
+  }
+});
+
 // 특정 채팅 상세 정보 가져오기 (드로잉 등 포함)
 app.get('/api/chats/detail/:id', async (req, res) => {
   try {
