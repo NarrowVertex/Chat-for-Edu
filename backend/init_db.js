@@ -15,7 +15,7 @@ async function init() {
     // 데이터베이스 생성
     await connection.query('CREATE DATABASE IF NOT EXISTS gemini_db');
     console.log("Database 'gemini_db' created or already exists.");
-    
+
     // 데이터베이스 선택
     await connection.query('USE gemini_db');
 
@@ -39,6 +39,7 @@ async function init() {
         id INT AUTO_INCREMENT PRIMARY KEY,
         owner_id INT NOT NULL,
         title VARCHAR(255) NOT NULL,
+        drawings LONGTEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (owner_id) REFERENCES Users(id) ON DELETE CASCADE
@@ -63,7 +64,7 @@ async function init() {
         position_y FLOAT DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (chat_id) REFERENCES Chats(id) ON DELETE CASCADE,
-        FOREIGN KEY (parent_id) REFERENCES Messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (parent_id) REFERENCES Messages(id) ON DELETE SET NULL,
         FOREIGN KEY (reference_node_id) REFERENCES Messages(id) ON DELETE SET NULL
     );`;
 

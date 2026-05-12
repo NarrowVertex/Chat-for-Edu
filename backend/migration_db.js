@@ -13,32 +13,78 @@ async function migrate() {
     try {
         console.log('마이그레이션을 시작합니다...');
 
-        // 1. 새로운 컬럼들 추가 (기존 데이터 유지)
+        // 1. Messages 테이블 외래키 제약조건 수정
         try {
             await connection.query(`
                 ALTER TABLE Messages 
-                ADD COLUMN position_x FLOAT DEFAULT NULL AFTER reference_node_id,
-                ADD COLUMN position_y FLOAT DEFAULT NULL AFTER position_x;
+                DROP FOREIGN KEY messages_ibfk_2; 
             `);
-            console.log('컬럼 추가 완료: Messages.position_x, position_y');
+            console.log('기존 외래키 제약조건 삭제 완료: 제약조건(messages_ibfk_2)');
         } catch (err) {
-            if (err.code !== 'ER_DUP_COLUMN_NAME' && err.code !== 'ER_DUP_FIELDNAME') throw err;
+            console.log('외래키 삭제 건너뜀 (이미 삭제되었거나 존재하지 않음)');
         }
 
-        // 2. 새로운 외래 키 제약 조건 설정
-        try {
-            await connection.query(`
-                ALTER TABLE Messages
-                ADD CONSTRAINT FK_Messages_Reference
-                FOREIGN KEY (reference_node_id) REFERENCES Messages(id)
-                ON DELETE SET NULL;
-            `);
-            console.log('외래 키 제약 조건 추가 완료: reference_node_id');
-        } catch (err) {
-            // Already exists or other error
+        await connection.query(`
+            ALTER TABLE Messages 
+            ADD CONSTRAINT messages_ibfk_2
+            FOREIGN KEY (parent_id) REFERENCES Messages(id) 
+            ON DELETE SET NULL;
+        `);
+        console.log('Messages 테이블 외래키 제약 조건 변경 완료');
+
+        // 2. Quizzes 테이블 생성
+        await connection.query(`
+            CREATE TABLE IF NOT EXISTS Quizzes (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                chat_id INT NOT NULL,
+                title VARCHAR(255),
+                status VARCHAR(50) DEFAULT 'ready',
+                config JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (chat_id) REFERENCES Chats(id) ON DELETE CASCADE
+            )
+        `);
+        console.log('Quizzes 테이블 확인/생성 완료');
+
+        // 3. Questions 테이블 생성
+        await connection.query(`
+            CREATE TABLE IF NOT EXISTS Questions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                quiz_id INT NOT NULL,
+                question_text TEXT,
+                question_type VARCHAR(50),
+                options JSON,
+                correct_answer TEXT,
+                explanation TEXT,
+                FOREIGN KEY (quiz_id) REFERENCES Quizzes(id) ON DELETE CASCADE
+            )
+        `);
+        console.log('Questions 테이블 확인/생성 완료');
+
+        // 4. Questions 테이블 컬럼 추가 마이그레이션
+        const [columns] = await connection.query(`SHOW COLUMNS FROM Questions`);
+        const columnNames = columns.map(c => c.Field);
+
+        if (!columnNames.includes('difficulty')) {
+            await connection.query('ALTER TABLE Questions ADD COLUMN difficulty VARCHAR(50) AFTER explanation');
+            console.log('Questions 테이블에 difficulty 컬럼 추가 완료');
         }
 
-        // 3. Users 테이블에 선호 모델 컬럼 추가
+        if (!columnNames.includes('created_at')) {
+            await connection.query('ALTER TABLE Questions ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER difficulty');
+            console.log('Questions 테이블에 created_at 컬럼 추가 완료');
+        }
+
+        // 5. Chats 테이블 drawings 컬럼 추가
+        const [chatColumns] = await connection.query(`SHOW COLUMNS FROM Chats`);
+        const chatColumnNames = chatColumns.map(c => c.Field);
+
+        if (!chatColumnNames.includes('drawings')) {
+            await connection.query('ALTER TABLE Chats ADD COLUMN drawings LONGTEXT AFTER updated_at');
+            console.log('Chats 테이블에 drawings 컬럼 추가 완료');
+        }
+
+        // 6. Users 테이블 선호 모델 컬럼 추가
         try {
             await connection.query(`
                 ALTER TABLE Users 
@@ -46,7 +92,7 @@ async function migrate() {
             `);
             console.log('컬럼 추가 완료: Users.preferred_model');
         } catch (err) {
-            if (err.code !== 'ER_DUP_COLUMN_NAME') throw err;
+            if (err.code !== 'ER_DUP_FIELDNAME') throw err;
             console.warn('Users.preferred_model 컬럼이 이미 존재합니다.');
         }
 
