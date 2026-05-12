@@ -2757,11 +2757,6 @@ function App() {
         {/* 공통 입력창 영역 */}
         {viewMode !== 'quiz' && viewMode !== 'summary' && (
           <div className={`input-area-wrapper ${isNodeModalOpen && viewMode === 'node' ? 'panel-open' : ''}`}>
-            {imagePreviewUrl && (
-              <div className="image-preview-container">
-                <div className="preview-bubble"><img src={imagePreviewUrl} alt="p" /><button className="remove-image-btn" onClick={clearImage}><X size={14} /></button></div>
-              </div>
-            )}
 
             <div className="input-area-content" style={{ width: '100%', maxWidth: '800px', display: 'flex', flexDirection: 'column' }}>
               {/* 좌측 상단 필기 모드 (노드 모드 전용) */}
@@ -2889,6 +2884,11 @@ function App() {
               )}
               
               <div className={`input-container ${isGenerating ? 'disabled' : ''}`}>
+                {imagePreviewUrl && (
+                  <div className="image-preview-container" style={{ paddingLeft: '4px', paddingBottom: '4px' }}>
+                    <div className="preview-bubble"><img src={imagePreviewUrl} alt="p" /><button className="remove-image-btn" onClick={clearImage}><X size={14} /></button></div>
+                  </div>
+                )}
               <textarea
                 ref={textareaRef}
                 className="input-field"
@@ -2907,9 +2907,17 @@ function App() {
               />
               <div className="input-actions">
                 <div className="input-actions-left">
-                  <label style={{ cursor: isGenerating ? 'not-allowed' : 'pointer' }}>
+                  <label htmlFor="file-upload-input" style={{ cursor: isGenerating ? 'not-allowed' : 'pointer' }}>
                     <Paperclip size={20} style={{ opacity: isGenerating ? 0.5 : 1 }} />
-                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => processImageFile(e.target.files[0])} disabled={isGenerating} />
+                    <input 
+                      id="file-upload-input" 
+                      type="file" 
+                      accept="image/*" 
+                      style={{ display: 'none' }} 
+                      onClick={(e) => { e.target.value = null; }}
+                      onChange={(e) => processImageFile(e.target.files[0])} 
+                      disabled={isGenerating} 
+                    />
                   </label>
 
                   {/* AI 모델 선택 박스 (Premium Custom Dropdown) */}
