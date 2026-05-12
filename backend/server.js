@@ -6,22 +6,8 @@ const db = require('./db');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-
-// Gemini API 초기화 (사용자 요청으로 gemini-2.5-flash로 원복)
-const MODEL_NAME = "gemini-2.5-flash";
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" });
-
-// 이미지 데이터를 Gemini API용 포맷으로 변환하는 함수
-function fileToGenerativePart(path, mimeType) {
-  return {
-    inlineData: {
-      data: Buffer.from(fs.readFileSync(path)).toString("base64"),
-      mimeType,
-    },
-  };
-}
+const aiService = require('./ai-service');
+const availableModels = aiService.availableModels;
 
 function getMimeType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
@@ -52,15 +38,15 @@ async function getChatHistory(parentId) {
     // 1. 모델 답변 (AI)
     if (msg.answer_text) {
       history.push({
-        role: "model",
-        parts: [{ text: msg.answer_text }],
+        role: "assistant",
+        content: msg.answer_text,
       });
     }
     // 2. 사용자 질문 (User)
     if (msg.question_text) {
       history.push({
         role: "user",
-        parts: [{ text: msg.question_text }],
+        content: msg.question_text,
       });
     }
 
@@ -205,7 +191,14 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: "존재하지 않는 정보입니다" });
     }
 
-    res.json({ message: "로그인 성공", user: { id: user.id, user_id: user.user_id } });
+    res.json({
+      message: "로그인 성공",
+      user: {
+        id: user.id,
+        user_id: user.user_id,
+        preferred_model: user.preferred_model
+      }
+    });
   } catch (error) {
     console.error("Login Error:", error);
     res.status(500).json({ error: "서버 내부 오류가 발생했습니다." });
@@ -221,6 +214,33 @@ app.delete('/api/auth/user/:id', async (req, res) => {
   } catch (error) {
     console.error("Delete Account Error:", error);
     res.status(500).json({ error: "서버 내부 오류가 발생했습니다." });
+  }
+});
+
+// --- AI 모델 관련 API ---
+
+// 사용 가능한 모델 리스트 가져오기
+app.get('/api/ai-models', (req, res) => {
+  // API Key 환경변수명은 제외하고 클라이언트에 전달
+  const clientModels = availableModels.map(({ apiKeyEnv, ...rest }) => rest);
+  res.json(clientModels);
+});
+
+// 유저 선호 모델 업데이트
+app.patch('/api/auth/user/:id/preferred-model', async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { preferred_model } = req.body;
+
+    // 모델 존재 여부 확인 (null인 경우는 리스트의 첫번째로 간주되게 함)
+    const modelExists = availableModels.some(m => m.id === preferred_model);
+    const modelToSave = modelExists ? preferred_model : (availableModels[0]?.id || null);
+
+    await db.execute('UPDATE Users SET preferred_model = ? WHERE id = ?', [modelToSave, userId]);
+    res.json({ message: "선호 모델이 업데이트되었습니다.", preferred_model: modelToSave });
+  } catch (error) {
+    console.error("Update Preferred Model Error:", error);
+    res.status(500).json({ error: "선호 모델 업데이트에 실패했습니다." });
   }
 });
 
@@ -339,9 +359,9 @@ app.get('/api/search/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
     const query = req.query.q;
-    
+
     if (!query || query.trim() === '') return res.json([]);
-    
+
     const searchPattern = `%${query}%`;
     const results = [];
 
@@ -350,7 +370,7 @@ app.get('/api/search/:userId', async (req, res) => {
       'SELECT id, title FROM Chats WHERE owner_id = ? AND title LIKE ? ORDER BY updated_at DESC',
       [userId, searchPattern]
     );
-    
+
     chats.forEach(chat => {
       results.push({
         type: 'chat',
@@ -380,7 +400,7 @@ app.get('/api/search/:userId', async (req, res) => {
       let snippet = '';
       const lowerQuery = query.toLowerCase();
       const fields = [node.node_title || '', node.question_text || '', node.answer_text || ''];
-      
+
       for (const text of fields) {
         const lowerText = text.toLowerCase();
         const idx = lowerText.indexOf(lowerQuery);
@@ -445,7 +465,7 @@ app.patch('/api/chats/:id/drawings', async (req, res) => {
   try {
     const chatId = req.params.id;
     const { drawings } = req.body; // JSON string expected
-    
+
     await db.execute('UPDATE Chats SET drawings = ? WHERE id = ?', [drawings, chatId]);
     res.json({ message: "드로잉 데이터가 저장되었습니다." });
   } catch (error) {
@@ -457,7 +477,7 @@ app.patch('/api/chats/:id/drawings', async (req, res) => {
 // 새로운 채팅 생성 및 첫 Q&A 노드 저장
 app.post('/api/chats', upload.single('photo'), async (req, res) => {
   try {
-    const { owner_id, text_content } = req.body;
+    const { owner_id, text_content, model_id } = req.body;
     const photo_url = req.file ? `/uploads/${req.file.filename}` : null;
 
     // 1. Gemini를 통해 제목과 답변 동시 생성 요청
@@ -474,14 +494,18 @@ app.post('/api/chats', upload.single('photo'), async (req, res) => {
 
 [중요] 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
 
-    let parts = [prompt];
-    if (req.file) {
-      parts.push(fileToGenerativePart(req.file.path, req.file.mimetype));
+    // 사용자 선호 모델 조회 (model_id가 없을 경우 대비)
+    let finalModelId = model_id;
+    if (!finalModelId) {
+      const [userRows] = await db.execute('SELECT preferred_model FROM Users WHERE id = ?', [owner_id]);
+      finalModelId = userRows[0]?.preferred_model || availableModels[0]?.id;
     }
 
-    const result_ai = await model.generateContent(parts);
-    const response_ai = await result_ai.response;
-    const fullText = response_ai.text();
+    const fullText = await aiService.generateResponse(finalModelId, {
+      prompt,
+      imagePath: req.file ? req.file.path : null,
+      mimeType: req.file ? req.file.mimetype : null
+    });
 
     // [TITLE]과 [ANSWER] 파싱
     let aiTitle = text_content.substring(0, 15); // Fallback
@@ -653,7 +677,7 @@ app.post('/api/nodes/connect', async (req, res) => {
 // 기존 노드에서 파생된 새로운 Q&A 노드 생성
 app.post('/api/nodes', upload.single('photo'), async (req, res) => {
   try {
-    let { chat_id, parent_id, reference_node_id, text_content, node_label, node_type, answer_text } = req.body;
+    let { chat_id, parent_id, reference_node_id, text_content, node_label, node_type, answer_text, model_id } = req.body;
     const photo_url = req.file ? `/uploads/${req.file.filename}` : null;
 
     if (parent_id === "null" || parent_id === "" || parent_id === undefined) parent_id = null;
@@ -688,25 +712,24 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
 
 [중요] 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
 
-      // 2. 히스토리와 현재 질문 결합
-      let contents = [...history];
-
-      let currentPart = { text: prompt };
-      let currentParts = [currentPart];
-
-      if (req.file) {
-        currentParts.push(fileToGenerativePart(req.file.path, req.file.mimetype));
+      // 모델 결정
+      let finalModelId = model_id;
+      if (!finalModelId) {
+        const [[chatInfo]] = await db.execute('SELECT owner_id FROM Chats WHERE id = ?', [chat_id]);
+        if (chatInfo) {
+          const [userRows] = await db.execute('SELECT preferred_model FROM Users WHERE id = ?', [chatInfo.owner_id]);
+          finalModelId = userRows[0]?.preferred_model;
+        }
+        finalModelId = finalModelId || availableModels[0]?.id;
       }
 
-      contents.push({
-        role: "user",
-        parts: currentParts
+      // 3. AI 호출
+      const fullText = await aiService.generateResponse(finalModelId, {
+        prompt,
+        history,
+        imagePath: req.file ? req.file.path : null,
+        mimeType: req.file ? req.file.mimetype : null
       });
-
-      // 3. gemini 호출 (generateContent를 사용하여 전체 문맥 전달)
-      const result_ai = await model.generateContent({ contents });
-      const response_ai = await result_ai.response;
-      const fullText = response_ai.text();
 
       const titleMatch = fullText.match(/\[TITLE\]\s*(.*)/i);
       const answerMatch = fullText.match(/\[ANSWER\]\s*([\s\S]*)/i);
@@ -739,6 +762,7 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
 // AI 답변 재생성 API
 app.put('/api/messages/:id/regenerate', async (req, res) => {
   const { id } = req.params;
+  const { model_id } = req.body;
   try {
     // 1. 기존 메시지 정보 조회 (질문 텍스트 및 부모 ID 확보)
     const [messages] = await db.execute('SELECT * FROM Messages WHERE id = ?', [id]);
@@ -767,22 +791,26 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
 
 [중요] 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
 
-    let contents = [...history];
-    let currentParts = [{ text: prompt }];
-
-    // 사진이 있으면 경로를 찾아 절대 경로로 변환 (멀티모달 복구)
-    if (msg.photo_url) {
-      const photoPath = path.join(__dirname, msg.photo_url);
-      if (fs.existsSync(photoPath)) {
-        currentParts.push(fileToGenerativePart(photoPath, getMimeType(photoPath)));
+    // 모델 결정
+    let finalModelId = model_id;
+    if (!finalModelId) {
+      const [[msgInfo]] = await db.execute('SELECT chat_id FROM Messages WHERE id = ?', [id]);
+      if (msgInfo) {
+        const [[chatInfo]] = await db.execute('SELECT owner_id FROM Chats WHERE id = ?', [msgInfo.chat_id]);
+        if (chatInfo) {
+          const [userRows] = await db.execute('SELECT preferred_model FROM Users WHERE id = ?', [chatInfo.owner_id]);
+          finalModelId = userRows[0]?.preferred_model;
+        }
       }
+      finalModelId = finalModelId || availableModels[0]?.id;
     }
 
-    contents.push({ role: "user", parts: currentParts });
-
-    const result_ai = await model.generateContent({ contents });
-    const response_ai = await result_ai.response;
-    const fullText = response_ai.text();
+    const fullText = await aiService.generateResponse(finalModelId, {
+      prompt,
+      history,
+      imagePath: msg.photo_url ? path.join(__dirname, msg.photo_url) : null,
+      mimeType: "image/jpeg" // Assuming jpeg for stored photos
+    });
 
     const titleMatch = fullText.match(/\[TITLE\]\s*(.*)/i);
     const answerMatch = fullText.match(/\[ANSWER\]\s*([\s\S]*)/i);
@@ -852,7 +880,7 @@ app.post('/api/quiz/generate', async (req, res) => {
     quizId = quizResult.insertId;
 
     try {
-      const contextText = nodes.map(n => 
+      const contextText = nodes.map(n =>
         `제목: ${n.node_title}\n질문: ${n.question_text}\n내용: ${n.answer_text}`
       ).join('\n\n---\n\n');
 
@@ -866,7 +894,7 @@ app.post('/api/quiz/generate', async (req, res) => {
         difficultyInstruction = "제공된 학습 내용을 기반으로 하되, 그 이상의 추론이나 관련 심화 지식을 연계하여 비판적 사고를 요구하는 확장형 문제를 출제하세요.";
       }
 
-      let calculationInstruction = includeCalculation 
+      let calculationInstruction = includeCalculation
         ? "주관식(short)과 서술형(descriptive) 문제는 반드시 제공된 수식이나 원리를 활용하여 직접 계산하거나 수치를 도출해야 하는 문제로 구성하세요."
         : "개념 설명 위주의 문제를 구성하세요.";
 
@@ -981,10 +1009,10 @@ ${contextText}
     if (quizId) {
       await db.execute('DELETE FROM Quizzes WHERE id = ?', [quizId]);
     }
-    res.status(500).json({ 
-      error: error.status === 429 
-        ? "AI 사용량 제한이 초과되었습니다. 잠시 후 다시 시도해 주세요." 
-        : "퀴즈 생성에 실패했습니다." 
+    res.status(500).json({
+      error: error.status === 429
+        ? "AI 사용량 제한이 초과되었습니다. 잠시 후 다시 시도해 주세요."
+        : "퀴즈 생성에 실패했습니다."
     });
   }
 });

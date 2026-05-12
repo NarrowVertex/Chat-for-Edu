@@ -84,6 +84,18 @@ async function migrate() {
             console.log('Chats 테이블에 drawings 컬럼 추가 완료');
         }
 
+        // 6. Users 테이블 선호 모델 컬럼 추가
+        try {
+            await connection.query(`
+                ALTER TABLE Users 
+                ADD COLUMN preferred_model VARCHAR(255) DEFAULT NULL;
+            `);
+            console.log('컬럼 추가 완료: Users.preferred_model');
+        } catch (err) {
+            if (err.code !== 'ER_DUP_FIELDNAME') throw err;
+            console.warn('Users.preferred_model 컬럼이 이미 존재합니다.');
+        }
+
         console.log('모든 마이그레이션이 성공적으로 완료되었습니다.');
     } catch (error) {
         console.error('마이그레이션 도중 에러 발생:', error);
