@@ -1,4 +1,5 @@
 require('dotenv').config();
+const setupDb = require('./setup_db');
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
@@ -57,71 +58,13 @@ async function getChatHistory(parentId) {
   return history.reverse();
 }
 
-// 데이터베이스 테이블 초기화
-async function initDB() {
-  try {
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS Quizzes (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        chat_id INT NOT NULL,
-        title VARCHAR(255),
-        status VARCHAR(50) DEFAULT 'ready',
-        config JSON,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (chat_id) REFERENCES Chats(id) ON DELETE CASCADE
-      )
-    `);
 
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS Questions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        quiz_id INT NOT NULL,
-        question_text TEXT,
-        question_type VARCHAR(50),
-        options JSON,
-        correct_answer TEXT,
-        explanation TEXT,
-        difficulty VARCHAR(50),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (quiz_id) REFERENCES Quizzes(id) ON DELETE CASCADE
-      )
-    `);
-
-    // [추가] 기존 테이블에 컬럼이 없을 경우를 대비한 자동 마이그레이션
-    try {
-      await db.execute('ALTER TABLE Questions ADD COLUMN difficulty VARCHAR(50) AFTER explanation');
-      console.log('[DB Migration] Questions 테이블에 difficulty 컬럼을 추가했습니다.');
-    } catch (err) {
-      if (err.code !== 'ER_DUP_COLUMN_NAME') {
-        console.error('[DB Migration] difficulty 추가 중 에러:', err.message);
-      }
-    }
-
-    try {
-      await db.execute('ALTER TABLE Questions ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER difficulty');
-      console.log('[DB Migration] Questions 테이블에 created_at 컬럼을 추가했습니다.');
-    } catch (err) {
-      if (err.code !== 'ER_DUP_COLUMN_NAME') {
-        console.error('[DB Migration] created_at 추가 중 에러:', err.message);
-      }
-    }
-
-    // [추가] 서버 시작 시, 완료되지 못하고 'generating' 상태로 남은 유령 데이터 삭제
-    const [cleanupResult] = await db.execute(`DELETE FROM Quizzes WHERE status = 'generating'`);
-    if (cleanupResult.affectedRows > 0) {
-      console.log(`[DB Cleanup] ${cleanupResult.affectedRows}개의 유령 퀴즈 데이터를 정리했습니다.`);
-    }
-
-    console.log('퀴즈 관련 테이블 및 데이터 정리 완료');
-  } catch (err) {
-    console.error('DB 초기화 에러:', err);
-  }
-}
-initDB();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// 누적된 대화 히스토리 및 대용량 데이터 전송을 감당하기 위해 페이로드 제한을 50mb로 대폭 확장
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // static folder for uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -144,6 +87,16 @@ app.post('/api/auth/register', async (req, res) => {
     const { user_id, password } = req.body;
     if (!user_id || !password) {
       return res.status(400).json({ error: "아이디와 비밀번호를 모두 입력해주세요." });
+    }
+
+    // 아이디 최소 글자 수 제한 (6자 이상)
+    if (user_id.length < 6) {
+      return res.status(400).json({ error: "아이디는 최소 6자 이상 입력해주세요." });
+    }
+
+    // 비밀번호 최소 글자 수 제한 (8자 이상)
+    if (password.length < 8) {
+      return res.status(400).json({ error: "비밀번호는 최소 8자 이상 입력해주세요." });
     }
 
     const isValidString = (str) => /^[\x21-\x7E]+$/.test(str);
@@ -683,6 +636,26 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
     if (parent_id === "null" || parent_id === "" || parent_id === undefined) parent_id = null;
     if (reference_node_id === "null" || reference_node_id === "" || reference_node_id === undefined) reference_node_id = null;
 
+    // ─────────────────────────────────────────────────────────────────
+    // [외래키 보호 방어벽] 삭제된 노드 ID 유입 시 루트(null) 강제 변환 로직
+    // (※ 이전 상태로 복구하시려면 아래 if (parent_id) ... 와 if (reference_node_id) ... 블록만 삭제하시면 됩니다.)
+    // ─────────────────────────────────────────────────────────────────
+    if (parent_id) {
+      const [pCheck] = await db.execute('SELECT id FROM Messages WHERE id = ?', [parent_id]);
+      if (pCheck.length === 0) {
+        console.warn(` 존재하지 않는 parent_id(${parent_id}) 감지. 안전을 위해 null(루트)로 강제 변환합니다.`);
+        parent_id = null;
+      }
+    }
+    if (reference_node_id) {
+      const [rCheck] = await db.execute('SELECT id FROM Messages WHERE id = ?', [reference_node_id]);
+      if (rCheck.length === 0) {
+        console.warn(` 존재하지 않는 reference_node_id(${reference_node_id}) 감지. 안전을 위해 null로 강제 변환합니다.`);
+        reference_node_id = null;
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────
+
     // 이름표(node_label) 자동 생성 로직 (단순화: updateMainNodeLabels가 최종 확정함)
     if (!node_label || node_label === "undefined") {
       node_label = reference_node_id ? 'temp-node' : 'B1-1';
@@ -748,7 +721,11 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
     // 전역 재배열 엔진(updateMainNodeLabels)을 반드시 수행합니다.
     await updateMainNodeLabels(chat_id);
 
-    res.status(201).json({ id: result.insertId, node_title: aiTitle });
+    // 최종 확정된 라벨을 DB에서 다시 읽어와 클라이언트에 확실하게 전달
+    const [labelRows] = await db.execute('SELECT node_label FROM Messages WHERE id = ?', [result.insertId]);
+    const finalLabel = (labelRows && labelRows.length > 0) ? labelRows[0].node_label : 'M1-1';
+
+    res.status(201).json({ id: result.insertId, node_title: aiTitle, node_label: finalLabel });
   } catch (error) {
     console.error("Add Node Error:", error);
     res.status(500).json({
@@ -947,10 +924,19 @@ ${contextText}
 
 한글로 작성하세요.`;
 
-      // 3. Gemini 호출
-      const result_ai = await model.generateContent(prompt);
-      const response_ai = await result_ai.response;
-      let fullText = response_ai.text();
+      // 3. 채팅방 소유자의 선호 모델 조회 후 표준 AI 서비스 연동
+      let finalModelId = availableModels[0]?.id;
+      if (chatId) {
+        const [[chatInfo]] = await db.execute('SELECT owner_id FROM Chats WHERE id = ?', [chatId]);
+        if (chatInfo) {
+          const [userRows] = await db.execute('SELECT preferred_model FROM Users WHERE id = ?', [chatInfo.owner_id]);
+          if (userRows[0]?.preferred_model) {
+            finalModelId = userRows[0].preferred_model;
+          }
+        }
+      }
+
+      const fullText = await aiService.generateResponse(finalModelId, { prompt });
 
       console.log("--- AI Raw Response ---");
       console.log(fullText);
@@ -1135,6 +1121,16 @@ app.delete('/api/nodes/:nodeId', async (req, res) => {
 
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Gemini Backend Server running on port ${PORT}`);
-});
+
+// 데이터베이스 스키마 자동 점검 완료 후 안전하게 HTTP 서버 가동
+setupDb()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`\n🚀 Gemini Backend Server running securely on port ${PORT}\n`);
+    });
+  })
+  .catch(err => {
+    console.error('❌ 서버 구동 중단 (DB 초기화 및 점검 실패):', err);
+    process.exit(1);
+  });
+
