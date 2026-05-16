@@ -4,7 +4,7 @@ import {
   Menu, Plus, Compass, Sparkles, Mic, Paperclip, MessageSquare, MessageCircle, X,
   ArrowLeft, Search, Share2, Star, Edit3, RotateCcw, ThumbsUp, ThumbsDown,
   MoreVertical, ChevronRight, ChevronDown, Hash, Send, ExternalLink, CornerDownRight, SquarePlus, Trash2, Loader2, Bell, Check,
-  Pencil, Highlighter, Eraser, Type, FileText
+  Pencil, Highlighter, Eraser, Type, FileText, BookOpen
 } from 'lucide-react';
 import './App.css';
 import ReactMarkdown from 'react-markdown';
@@ -85,6 +85,10 @@ function App() {
   // Node Title Editing State
   const [isEditingNodeTitle, setIsEditingNodeTitle] = useState(false);
   const [editedNodeTitle, setEditedNodeTitle] = useState('');
+
+  // Memo Editing State
+  const [isEditingMemo, setIsEditingMemo] = useState(false);
+  const [editedMemo, setEditedMemo] = useState('');
 
   // Image Modal State
   const [enlargedImage, setEnlargedImage] = useState(null);
@@ -1182,6 +1186,32 @@ function App() {
     }
   };
 
+  const handleMemoUpdate = async () => {
+    if (!selectedNode) {
+      setIsEditingMemo(false);
+      return;
+    }
+    try {
+      const response = await fetch(`http://localhost:5000/api/nodes/${selectedNode.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question_text: editedMemo })
+      });
+      if (response.ok) {
+        // 로컬 상태 동기화
+        const updatedNodes = nodes.map(n => 
+          n.id === selectedNode.id ? { ...n, question_text: editedMemo } : n
+        );
+        setNodes(updatedNodes);
+        setSelectedNode({ ...selectedNode, question_text: editedMemo });
+      }
+      setIsEditingMemo(false);
+    } catch (err) {
+      console.error('Update Memo Error:', err);
+      setIsEditingMemo(false);
+    }
+  };
+
   const handleDeleteNode = async () => {
     if (!selectedNode) return;
     const deletedNodeId = selectedNode.id;
@@ -1938,19 +1968,63 @@ function App() {
         <header className="top-bar">
           <div className="logo-text">Chat for Edu</div>
           <div className="user-controls">
-            <div className="notification-wrapper" style={{ position: 'relative' }}>
+            <button 
+              className="icon-button tutorial-btn" 
+              style={{ marginRight: '16px' }} 
+              title="사용 가이드 (튜토리얼)"
+              onClick={() => alert('튜토리얼 준비 중입니다!')}
+            >
+              <BookOpen size={22} color="#5f6368" />
+            </button>
+            <div className="notification-wrapper" style={{ position: 'relative', width: '40px', height: '40px', marginRight: '16px' }}>
               <button 
                 className={`icon-button bell-btn ${quizTasks.some(t => t.status === 'generating') ? 'pulse' : ''}`}
                 onClick={() => setIsNotificationOpen(!isNotificationOpen)}
-                style={{ marginRight: '16px' }}
+                style={{ position: 'absolute', top: 0, left: 0, width: '40px', height: '40px', margin: 0 }}
               >
                 <Bell size={22} color={isNotificationOpen ? '#4285f4' : '#5f6368'} />
-                {quizTasks.length > 0 && <span className="notification-badge">{quizTasks.length}</span>}
               </button>
+              {quizTasks.length > 0 && (
+                <span 
+                  className="notification-badge" 
+                  style={{ 
+                    position: 'absolute', 
+                    top: '-2px', 
+                    right: '-2px', 
+                    pointerEvents: 'none',
+                    zIndex: 1
+                  }}
+                >
+                  {quizTasks.length}
+                </span>
+              )}
+
 
               {isNotificationOpen && (
                 <div className="notification-dropdown glass-panel-v3">
-                  <div className="notif-header">알림</div>
+                  <div className="notif-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>알림</span>
+                    {quizTasks.length > 0 && (
+                      <button 
+                        onClick={() => setQuizTasks([])}
+                        style={{ 
+                          background: 'none', 
+                          border: 'none', 
+                          color: '#4285f4', 
+                          fontSize: '11px', 
+                          cursor: 'pointer',
+                          fontWeight: 'normal',
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseOver={(e) => e.target.style.backgroundColor = 'rgba(66, 133, 244, 0.1)'}
+                        onMouseOut={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        모두 삭제
+                      </button>
+                    )}
+                  </div>
                   <div className="notif-list">
                     {quizTasks.length === 0 ? (
                       <div className="notif-empty">새로운 알림이 없습니다.</div>
@@ -2103,10 +2177,66 @@ function App() {
                     <div className="panel-scroll-area">
                       {/* 질문 (사용자 말풍선) */}
                       <div className="panel-message user">
-                        <span className="panel-message-label">{selectedNode.node_type === 'content' ? '메모' : '질문'}</span>
-                        <div className="panel-bubble">
-                          {selectedNode.question_text}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span className="panel-message-label">{selectedNode.node_type === 'content' ? '메모' : '질문'}</span>
+                          {selectedNode.node_type === 'content' && !isEditingMemo && (
+                            <button 
+                              className="edit-memo-btn" 
+                              onClick={() => {
+                                setEditedMemo(selectedNode.question_text);
+                                setIsEditingMemo(true);
+                              }}
+                              style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                              title="메모 수정"
+                            >
+                              <Edit3 size={14} />
+                            </button>
+                          )}
                         </div>
+                        {isEditingMemo ? (
+                          <div className="memo-edit-container">
+                            <textarea
+                              className="memo-edit-textarea"
+                              value={editedMemo}
+                              onChange={(e) => setEditedMemo(e.target.value)}
+                              autoFocus
+                              style={{
+                                width: '100%',
+                                minHeight: '100px',
+                                background: 'rgba(255, 255, 255, 0.05)',
+                                border: '1px solid rgba(255, 255, 255, 0.2)',
+                                borderRadius: '8px',
+                                color: '#fff',
+                                padding: '12px',
+                                fontSize: '14px',
+                                lineHeight: '1.6',
+                                resize: 'vertical',
+                                marginBottom: '8px',
+                                outline: 'none'
+                              }}
+                            />
+                            <div className="memo-edit-actions" style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                              <button 
+                                className="memo-cancel-btn" 
+                                onClick={() => setIsEditingMemo(false)}
+                                style={{ background: 'rgba(255, 255, 255, 0.1)', border: 'none', color: '#ccc', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                <X size={14} /> 취소
+                              </button>
+                              <button 
+                                className="memo-save-btn" 
+                                onClick={handleMemoUpdate}
+                                style={{ background: '#4285f4', border: 'none', color: '#fff', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                <Check size={14} /> 저장
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="panel-bubble">
+                            {selectedNode.question_text}
+                          </div>
+                        )}
                       </div>
 
                       {/* 답변 (AI 말풍선) */}
@@ -2595,6 +2725,13 @@ function App() {
                               {n.node_title || sanitizeMarkdown(n.answer_text).split('\n')[0].replace(/^[#*\s]+/, '') || '(제목 없음)'}
                             </div>
                             <div className="block-content">
+                              {n.photo_url && (
+                                <img 
+                                  src={`http://localhost:5000${n.photo_url}`} 
+                                  alt="Node context" 
+                                  className="summary-image" 
+                                />
+                              )}
                               <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
                                 {sanitizeMarkdown(n.answer_text)}
                               </ReactMarkdown>
@@ -2616,6 +2753,13 @@ function App() {
                                 {n.node_title || sanitizeMarkdown(n.answer_text).split('\n')[0].replace(/^[#*\s]+/, '') || '(제목 없음)'}
                               </div>
                               <div className="block-content">
+                                {n.photo_url && (
+                                  <img 
+                                    src={`http://localhost:5000${n.photo_url}`} 
+                                    alt="Node context" 
+                                    className="summary-image" 
+                                  />
+                                )}
                                 <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
                                   {sanitizeMarkdown(n.answer_text)}
                                 </ReactMarkdown>
@@ -2674,9 +2818,11 @@ function App() {
                           <button className="icon-button trash-btn" onClick={() => setIsDeleteNodeModalOpen(true)}>
                             <Trash2 size={18} />
                           </button>
-                          <button className="icon-button" onClick={handleRegenerate} disabled={isGenerating}>
-                            <RotateCcw size={18} className={isGenerating ? 'spinning-icon' : ''} />
-                          </button>
+                          {selectedNode.node_type !== 'content' && (
+                            <button className="icon-button" onClick={handleRegenerate} disabled={isGenerating}>
+                              <RotateCcw size={18} className={isGenerating ? 'spinning-icon' : ''} />
+                            </button>
+                          )}
                         </div>
                       </div>
                       <div className="understanding-score-wrap">
@@ -2705,8 +2851,64 @@ function App() {
                         </div>
                       )}
                       <div className="question-section">
-                        <div className="section-label">{selectedNode.node_type === 'content' ? '메모 내용' : '질문'}</div>
-                        <div className="text-box">{selectedNode.question_text}</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <div className="section-label">{selectedNode.node_type === 'content' ? '메모 내용' : '질문'}</div>
+                          {selectedNode.node_type === 'content' && !isEditingMemo && (
+                            <button 
+                              className="edit-memo-btn" 
+                              onClick={() => {
+                                setEditedMemo(selectedNode.question_text);
+                                setIsEditingMemo(true);
+                              }}
+                              style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                              title="메모 수정"
+                            >
+                              <Edit3 size={16} />
+                            </button>
+                          )}
+                        </div>
+                        {isEditingMemo ? (
+                          <div className="memo-edit-container">
+                            <textarea
+                              className="memo-edit-textarea"
+                              value={editedMemo}
+                              onChange={(e) => setEditedMemo(e.target.value)}
+                              autoFocus
+                              style={{
+                                width: '100%',
+                                minHeight: '120px',
+                                background: 'rgba(255, 255, 255, 0.05)',
+                                border: '1px solid rgba(255, 255, 255, 0.2)',
+                                borderRadius: '8px',
+                                color: '#fff',
+                                padding: '12px',
+                                fontSize: '15px',
+                                lineHeight: '1.7',
+                                resize: 'vertical',
+                                marginBottom: '10px',
+                                outline: 'none'
+                              }}
+                            />
+                            <div className="memo-edit-actions" style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                              <button 
+                                className="memo-cancel-btn" 
+                                onClick={() => setIsEditingMemo(false)}
+                                style={{ background: 'rgba(255, 255, 255, 0.1)', border: 'none', color: '#ccc', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                              >
+                                <X size={16} /> 취소
+                              </button>
+                              <button 
+                                className="memo-save-btn" 
+                                onClick={handleMemoUpdate}
+                                style={{ background: '#4285f4', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                              >
+                                <Check size={16} /> 저장
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-box">{selectedNode.question_text}</div>
+                        )}
                       </div>
                       {selectedNode.node_type !== 'content' && (
                         <div className="answer-section">

@@ -1540,7 +1540,7 @@ body {
   border-radius: 12px;
   color: #e3e3e3;
   font-size: 15px;
-  line-height: 1.7;
+  line-height: 1.85;
   border: 1px solid rgba(255, 255, 255, 0.1);
   word-break: break-word;
   /* 긴 질문/답변 자동 줄바꿈 */
@@ -2877,14 +2877,15 @@ body {
 /* Notification Styles */
 .notification-badge {
   position: absolute;
-  top: -4px;
-  right: -6px;
+  top: -2px;
+  right: -2px;
   background: #ff4d4d;
   color: white;
   border-radius: 50%;
   padding: 2px 6px;
   font-size: 10px;
   font-weight: bold;
+  pointer-events: none;
 }
 
 .notification-dropdown {
@@ -3305,7 +3306,7 @@ body {
   border-radius: 20px;
   max-width: 95%;
   font-size: 15px;
-  line-height: 1.6;
+  line-height: 1.85;
 }
 
 .panel-message.user .panel-bubble {
@@ -3504,6 +3505,16 @@ body {
   border-left: 4px solid #3b82f6;
   margin-bottom: 14px;
   line-height: 1.4;
+}
+
+.summary-paper-preview .summary-image {
+  max-width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  display: block;
+  border: 1px solid #e5e7eb;
 }
 
 .summary-paper-preview .block-content {

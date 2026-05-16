@@ -445,7 +445,7 @@ app.post('/api/chats', upload.single('photo'), async (req, res) => {
 [TITLE] 제목 내용
 [ANSWER] 답변 내용
 
-[중요] 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
+[중요] '안녕하세요', '학습 도우미입니다'와 같은 인사말이나 자기소개는 절대 포함하지 마세요. 바로 본론(학습 내용)부터 답변하세요. 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
 
     // 사용자 선호 모델 조회 (model_id가 없을 경우 대비)
     let finalModelId = model_id;
@@ -514,7 +514,7 @@ app.get('/api/chats/:chatId/nodes', async (req, res) => {
 app.patch('/api/nodes/:nodeId', async (req, res) => {
   try {
     const nodeId = req.params.nodeId;
-    const { node_title, understanding_score, is_favorite, reference_node_id, position_x, position_y } = req.body;
+    const { node_title, question_text, answer_text, understanding_score, is_favorite, reference_node_id, position_x, position_y } = req.body;
 
     const [[nodeInfo]] = await db.execute('SELECT chat_id FROM Messages WHERE id = ?', [nodeId]);
     if (!nodeInfo) return res.status(404).json({ error: "노드를 찾을 수 없습니다." });
@@ -523,6 +523,8 @@ app.patch('/api/nodes/:nodeId', async (req, res) => {
     let values = [];
 
     if (node_title !== undefined) { fields.push('node_title = ?'); values.push(node_title); }
+    if (question_text !== undefined) { fields.push('question_text = ?'); values.push(question_text); }
+    if (answer_text !== undefined) { fields.push('answer_text = ?'); values.push(answer_text); }
     if (understanding_score !== undefined) { fields.push('understanding_score = ?'); values.push(understanding_score); }
     if (is_favorite !== undefined) { fields.push('is_favorite = ?'); values.push(is_favorite); }
     if (position_x !== undefined) { fields.push('position_x = ?'); values.push(position_x); }
@@ -643,14 +645,14 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
     if (parent_id) {
       const [pCheck] = await db.execute('SELECT id FROM Messages WHERE id = ?', [parent_id]);
       if (pCheck.length === 0) {
-        console.warn(` 존재하지 않는 parent_id(${parent_id}) 감지. 안전을 위해 null(루트)로 강제 변환합니다.`);
+        console.warn(`[防御] 존재하지 않는 parent_id(${parent_id}) 감지. 안전을 위해 null(루트)로 강제 변환합니다.`);
         parent_id = null;
       }
     }
     if (reference_node_id) {
       const [rCheck] = await db.execute('SELECT id FROM Messages WHERE id = ?', [reference_node_id]);
       if (rCheck.length === 0) {
-        console.warn(` 존재하지 않는 reference_node_id(${reference_node_id}) 감지. 안전을 위해 null로 강제 변환합니다.`);
+        console.warn(`[防御] 존재하지 않는 reference_node_id(${reference_node_id}) 감지. 안전을 위해 null로 강제 변환합니다.`);
         reference_node_id = null;
       }
     }
@@ -683,7 +685,7 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
 [TITLE] 제목 내용
 [ANSWER] 답변 내용
 
-[중요] 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
+[중요] '안녕하세요', '학습 도우미입니다'와 같은 인사말이나 자기소개는 절대 포함하지 마세요. 바로 본론(학습 내용)부터 답변하세요. 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
 
       // 모델 결정
       let finalModelId = model_id;
@@ -766,7 +768,7 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
 [TITLE] 제목 내용
 [ANSWER] 답변 내용
 
-[중요] 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
+[중요] '안녕하세요', '학습 도우미입니다'와 같은 인사말이나 자기소개는 절대 포함하지 마세요. 바로 본론(학습 내용)부터 답변하세요. 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.`;
 
     // 모델 결정
     let finalModelId = model_id;
