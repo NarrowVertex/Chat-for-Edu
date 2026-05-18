@@ -59,13 +59,13 @@ function App() {
 
   const [nodeListTab, setNodeListTab] = useState('category'); // 'category' | 'score' | 'favorite'
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   // 메인 로비 전역 검색 상태
   const [lobbySearchQuery, setLobbySearchQuery] = useState('');
   const [lobbySearchResults, setLobbySearchResults] = useState([]);
   const [isLobbySearching, setIsLobbySearching] = useState(false);
   const [pendingNodeId, setPendingNodeId] = useState(null);
-  
+
   // 정리본(PDF 요약집) 상태
   const [compiledSummary, setCompiledSummary] = useState({
     mainNodes: [],
@@ -118,7 +118,7 @@ function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [availableModels, setAvailableModels] = useState([]);
   const [selectedModelId, setSelectedModelId] = useState('');
-  
+
   const textareaRef = useRef(null);
   const contextSelectorRef = useRef(null);
   const modelSelectorRef = useRef(null);
@@ -234,7 +234,7 @@ function App() {
 
   const fetchQuizzes = async (chatId) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/chats/${chatId}/quizzes`);
+      const response = await fetch(`/api/chats/${chatId}/quizzes`);
       if (response.ok) {
         const data = await response.json();
         setQuizList(data.map(q => ({
@@ -272,7 +272,7 @@ function App() {
     }, ...prev]);
 
     try {
-      const response = await fetch('http://localhost:5000/api/quiz/generate', {
+      const response = await fetch('/api/quiz/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -284,7 +284,7 @@ function App() {
 
       if (response.ok) {
         const { quizId, quizData } = await response.json();
-        
+
         // 작업 리스트 업데이트
         setQuizTasks(prev => prev.map(t => t.tempId === tempId ? { ...t, status: 'completed', resultId: quizId } : t));
 
@@ -292,10 +292,10 @@ function App() {
         setQuizList(prev => {
           const exists = prev.some(q => q.id === tempId);
           if (!exists) return prev;
-          return prev.map(q => q.id === tempId ? { 
-            ...q, 
+          return prev.map(q => q.id === tempId ? {
+            ...q,
             id: quizId,
-            status: 'ready', 
+            status: 'ready',
             data: quizData.map(d => ({
               type: d.type,
               question: d.question,
@@ -318,7 +318,7 @@ function App() {
     } catch (err) {
       // 네트워크 끊김이나 화면 이동 등으로 인한 에러 발생 시
       console.error("Generate Quiz Error:", err);
-      
+
       // 알림 상태는 일단 유지하거나 나중에 다시 확인할 수 있도록 함 (실패로 단정짓지 않음)
       // 만약 정말로 서버에 연결할 수 없는 상태라면 여기서 처리가 필요할 수 있지만, 
       // 현재는 "실패했다고 뜨는데 실제론 생성되는" 문제를 막기 위해 상태를 성급하게 바꾸지 않습니다.
@@ -330,7 +330,7 @@ function App() {
     let finalQuiz = quiz;
     if (!quiz.data || quiz.data.length === 0) {
       try {
-        const response = await fetch(`http://localhost:5000/api/quizzes/${quiz.id}/questions`);
+        const response = await fetch(`/api/quizzes/${quiz.id}/questions`);
         if (response.ok) {
           const questions = await response.json();
           const mappedQuestions = questions.map(q => ({
@@ -377,7 +377,7 @@ function App() {
     if (!window.confirm("정말 이 퀴즈를 삭제하시겠습니까?")) return;
 
     try {
-      const response = await fetch(`http://localhost:5000/api/quizzes/${quizId}`, {
+      const response = await fetch(`/api/quizzes/${quizId}`, {
         method: 'DELETE'
       });
       if (response.ok) {
@@ -399,14 +399,14 @@ function App() {
   const handleEditQuizTitleSubmit = async (e, quizId) => {
     e.preventDefault();
     e.stopPropagation();
-    
+
     if (!editingQuizTitle.trim()) {
       setEditingQuizId(null);
       return;
     }
 
     try {
-      const response = await fetch(`http://localhost:5000/api/quizzes/${quizId}/title`, {
+      const response = await fetch(`/api/quizzes/${quizId}/title`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: editingQuizTitle })
@@ -428,7 +428,7 @@ function App() {
 
     // 1. 해당 프로젝트로 이동 (ID 타입 불일치 방지를 위해 String 변환 비교)
     const isSameProject = activeChat && String(activeChat.id) === String(task.chatId);
-    
+
     if (!isSameProject) {
       const targetChat = historyItems.find(c => String(c.id) === String(task.chatId));
       if (targetChat) {
@@ -441,13 +441,13 @@ function App() {
       // 이미 같은 프로젝트를 가리키고 있더라도, 뷰(Home -> Project)는 전환해줘야 함
       setView('project');
     }
-    
+
     // 무조건 퀴즈 탭으로 이동
     setViewMode('quiz');
 
     // 2. 알림 삭제
     setQuizTasks(prev => prev.filter(t => t.tempId !== task.tempId));
-    
+
     // 3. 알림창 닫기
     setIsNotificationOpen(false);
   };
@@ -463,12 +463,12 @@ function App() {
   const handleQuizSubmit = async () => {
     setIsGenerating(true); // 채점 중 로딩 표시용으로 재사용
     const newFeedback = [...quizFeedback];
-    
+
     try {
       for (let i = 0; i < activeQuiz.data.length; i++) {
         const q = activeQuiz.data[i];
         if (q.type === 'descriptive') {
-          const response = await fetch('http://localhost:5000/api/quiz/grade', {
+          const response = await fetch('/api/quiz/grade', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -541,7 +541,7 @@ function App() {
   // 사용 가능한 AI 모델 목록 불러오기
   const fetchModels = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/ai-models');
+      const response = await fetch('/api/ai-models');
       if (response.ok) {
         const data = await response.json();
         setAvailableModels(data);
@@ -570,7 +570,7 @@ function App() {
     setSelectedModelId(modelId);
     if (currentUser) {
       try {
-        await fetch(`http://localhost:5000/api/auth/user/${currentUser.id}/preferred-model`, {
+        await fetch(`/api/auth/user/${currentUser.id}/preferred-model`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ preferred_model: modelId })
@@ -584,7 +584,7 @@ function App() {
   // 사용자의 채팅 목록 불러오기
   const fetchChats = async (userId) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/chats/${userId}`);
+      const response = await fetch(`/api/chats/${userId}`);
       if (response.ok) {
         const data = await response.json();
         setHistoryItems(data);
@@ -597,7 +597,7 @@ function App() {
   // 특정 채팅의 노드들 불러오기
   const fetchNodes = async (chatId, selectId = null) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/chats/${chatId}/nodes`);
+      const response = await fetch(`/api/chats/${chatId}/nodes`);
       if (response.ok) {
         const data = await response.json();
         setNodes(data);
@@ -745,11 +745,11 @@ function App() {
       setLobbySearchResults([]);
       return;
     }
-    
+
     const timeoutId = setTimeout(async () => {
       setIsLobbySearching(true);
       try {
-        const res = await fetch(`http://localhost:5000/api/search/${currentUser.id}?q=${encodeURIComponent(lobbySearchQuery.trim())}`);
+        const res = await fetch(`/api/search/${currentUser.id}?q=${encodeURIComponent(lobbySearchQuery.trim())}`);
         if (res.ok) {
           const data = await res.json();
           setLobbySearchResults(data);
@@ -760,13 +760,13 @@ function App() {
         setIsLobbySearching(false);
       }
     }, 300);
-    
+
     return () => clearTimeout(timeoutId);
   }, [lobbySearchQuery, currentUser]);
 
   const handleGlobalSearchResultClick = async (result) => {
     const chatItem = historyItems.find(item => String(item.id) === String(result.chatId)) || { id: result.chatId, title: result.chatTitle };
-    
+
     if (result.type === 'chat') {
       enterProject(chatItem);
     } else if (result.type === 'node') {
@@ -847,7 +847,7 @@ function App() {
       setView('project');
       return;
     }
-    
+
     // 1. 현재 프로젝트 상태 저장
     if (activeChat) {
       saveCurrentSession(activeChat.id);
@@ -859,14 +859,14 @@ function App() {
     setDrawings([]); // 이전 프로젝트 필기 비우기
     setIsDrawingMode(false); // 필기 모드 초기화
     setCompiledSummary({ mainNodes: [], appendixNodes: [], isCompiled: false });
-    
+
     // 2. 새 프로젝트 정보 설정
     setActiveChat(chat);
-    
+
     // 3. 서버에서 최신 드로잉 데이터 가져오기 (사이드바 데이터가 stale할 수 있으므로)
     const syncDrawings = async () => {
       try {
-        const response = await fetch(`http://localhost:5000/api/chats/detail/${chat.id}`);
+        const response = await fetch(`/api/chats/detail/${chat.id}`);
         if (response.ok) {
           const freshChat = await response.json();
           if (freshChat.drawings) {
@@ -897,7 +897,7 @@ function App() {
     // 4. 새 프로젝트 세션 복구
     restoreSession(chat.id);
     syncDrawings();
-    
+
     setView('project');
   };
 
@@ -928,11 +928,11 @@ function App() {
 
       // 해당 M 노드 바로 뒤에 파생 하위 S 노드들 밀착 배치
       if (mNode.node_label) {
-        const sChildNodes = nodes.filter(n => 
+        const sChildNodes = nodes.filter(n =>
           n.node_label?.startsWith(`${mNode.node_label}-S`)
         );
         sChildNodes.sort((a, b) => (a.node_label || '').localeCompare(b.node_label || '', undefined, { numeric: true }));
-        
+
         sChildNodes.forEach(sNode => {
           if (!handledIds.has(sNode.id)) {
             mainResult.push({ ...sNode, isSubNode: true });
@@ -961,11 +961,11 @@ function App() {
       handledIds.add(bNode.id);
 
       if (bNode.node_label) {
-        const bChildNodes = nodes.filter(n => 
+        const bChildNodes = nodes.filter(n =>
           n.node_label?.startsWith(`${bNode.node_label}-S`)
         );
         bChildNodes.sort((a, b) => (a.node_label || '').localeCompare(b.node_label || '', undefined, { numeric: true }));
-        
+
         bChildNodes.forEach(sNode => {
           if (!handledIds.has(sNode.id)) {
             appendixResult.push({ ...sNode, isSubNode: true });
@@ -993,7 +993,7 @@ function App() {
 
   const handleRegister = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/auth/register', {
+      const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: loginId, password })
@@ -1015,7 +1015,7 @@ function App() {
 
   const handleLogin = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/auth/login', {
+      const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: loginId, password })
@@ -1037,7 +1037,7 @@ function App() {
   const handleDeleteAccount = async () => {
     if (!currentUser) return;
     try {
-      const response = await fetch(`http://localhost:5000/api/auth/user/${currentUser.id}`, {
+      const response = await fetch(`/api/auth/user/${currentUser.id}`, {
         method: 'DELETE'
       });
       if (response.ok) {
@@ -1060,7 +1060,7 @@ function App() {
 
   const updateNodeMetadata = async (nodeId, updates, skipFetch = false) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/nodes/${nodeId}`, {
+      const response = await fetch(`/api/nodes/${nodeId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates)
@@ -1092,7 +1092,7 @@ function App() {
     const connectionType = sourceHandle === 'bottom' ? 'child' : 'sibling';
 
     try {
-      const response = await fetch(`http://localhost:5000/api/nodes/connect`, {
+      const response = await fetch(`/api/nodes/connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1117,7 +1117,7 @@ function App() {
     if (!selectedNode || isGenerating) return;
     setIsGenerating(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/messages/${selectedNode.id}/regenerate`, {
+      const response = await fetch(`/api/messages/${selectedNode.id}/regenerate`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model_id: selectedModelId })
@@ -1149,7 +1149,7 @@ function App() {
       return;
     }
     try {
-      const response = await fetch(`http://localhost:5000/api/chats/${activeChat.id}`, {
+      const response = await fetch(`/api/chats/${activeChat.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: editedTitle })
@@ -1171,7 +1171,7 @@ function App() {
       return;
     }
     try {
-      const response = await fetch(`http://localhost:5000/api/nodes/${selectedNode.id}`, {
+      const response = await fetch(`/api/nodes/${selectedNode.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ node_title: editedNodeTitle })
@@ -1192,14 +1192,14 @@ function App() {
       return;
     }
     try {
-      const response = await fetch(`http://localhost:5000/api/nodes/${selectedNode.id}`, {
+      const response = await fetch(`/api/nodes/${selectedNode.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question_text: editedMemo })
       });
       if (response.ok) {
         // 로컬 상태 동기화
-        const updatedNodes = nodes.map(n => 
+        const updatedNodes = nodes.map(n =>
           n.id === selectedNode.id ? { ...n, question_text: editedMemo } : n
         );
         setNodes(updatedNodes);
@@ -1216,7 +1216,7 @@ function App() {
     if (!selectedNode) return;
     const deletedNodeId = selectedNode.id;
     try {
-      const response = await fetch(`http://localhost:5000/api/nodes/${deletedNodeId}`, {
+      const response = await fetch(`/api/nodes/${deletedNodeId}`, {
         method: 'DELETE'
       });
       if (response.ok) {
@@ -1236,7 +1236,7 @@ function App() {
   const handleDeleteProject = async () => {
     if (!activeChat) return;
     try {
-      const response = await fetch(`http://localhost:5000/api/chats/${activeChat.id}`, {
+      const response = await fetch(`/api/chats/${activeChat.id}`, {
         method: 'DELETE'
       });
       if (response.ok) {
@@ -1285,7 +1285,7 @@ function App() {
       return;
     }
     try {
-      const response = await fetch(`http://localhost:5000/api/chats/${chatId}`, {
+      const response = await fetch(`/api/chats/${chatId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: newTitle })
@@ -1308,7 +1308,7 @@ function App() {
     if (!deleteHistoryItem) return;
     const targetId = deleteHistoryItem.id;
     try {
-      const response = await fetch(`http://localhost:5000/api/chats/${targetId}`, {
+      const response = await fetch(`/api/chats/${targetId}`, {
         method: 'DELETE'
       });
       if (response.ok) {
@@ -1352,7 +1352,7 @@ function App() {
         formData.append('model_id', selectedModelId);
         if (selectedImage) formData.append('photo', selectedImage);
 
-        const response = await fetch('http://localhost:5000/api/chats', {
+        const response = await fetch('/api/chats', {
           method: 'POST',
           body: formData
         });
@@ -1401,7 +1401,7 @@ function App() {
 
       if (selectedImage) formData.append('photo', selectedImage);
 
-      const response = await fetch('http://localhost:5000/api/nodes', {
+      const response = await fetch('/api/nodes', {
         method: 'POST',
         body: formData
       });
@@ -1437,7 +1437,7 @@ function App() {
 
   const processImageFile = (file) => {
     if (!file) return;
-    
+
     // 이미지 파일 여부 확인
     if (!file.type.startsWith('image/')) {
       alert("이미지 파일(jpg, png, webp 등)만 업로드 가능합니다.");
@@ -1525,7 +1525,7 @@ function App() {
   }
 
   return (
-    <div 
+    <div
       className={`app-container mode-${viewMode} view-${view}`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
@@ -1619,33 +1619,33 @@ function App() {
             </div>
 
             <div className="node-search-bar" style={{ padding: '0 16px 12px 16px' }}>
-               <div style={{ position: 'relative' }}>
-                 <input 
-                   type="text" 
-                   placeholder="검색어를 입력하세요..." 
-                   value={searchQuery}
-                   onChange={(e) => setSearchQuery(e.target.value)}
-                   style={{ 
-                     width: '100%', 
-                     padding: '8px 12px 8px 32px', 
-                     borderRadius: '8px', 
-                     border: '1px solid rgba(255, 255, 255, 0.1)', 
-                     backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                     color: '#fff',
-                     fontSize: '14px',
-                     boxSizing: 'border-box'
-                   }}
-                 />
-                 <Search size={16} color="#888" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
-                 {searchQuery && (
-                   <button 
-                     onClick={() => setSearchQuery('')}
-                     style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '0', display: 'flex' }}
-                   >
-                     <X size={14} color="#888" />
-                   </button>
-                 )}
-               </div>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="text"
+                  placeholder="검색어를 입력하세요..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px 8px 32px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                    color: '#fff',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                <Search size={16} color="#888" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '0', display: 'flex' }}
+                  >
+                    <X size={14} color="#888" />
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="nodes-container">
@@ -1653,16 +1653,16 @@ function App() {
                 <div className="search-results-view">
                   {(() => {
                     const lowerQuery = searchQuery.toLowerCase();
-                    const filteredNodes = nodes.filter(n => 
+                    const filteredNodes = nodes.filter(n =>
                       (n.node_title && n.node_title.toLowerCase().includes(lowerQuery)) ||
                       (n.question_text && n.question_text.toLowerCase().includes(lowerQuery)) ||
                       (n.answer_text && n.answer_text.toLowerCase().includes(lowerQuery))
                     );
-                    
+
                     if (filteredNodes.length === 0) {
                       return <div className="score-group-empty" style={{ padding: '20px', textAlign: 'center' }}>검색 결과가 없습니다</div>;
                     }
-                    
+
                     return filteredNodes.map(node => (
                       <button
                         key={node.id}
@@ -1804,16 +1804,16 @@ function App() {
             <div className="sidebar-content">
               <div className="lobby-search-bar" style={{ padding: '0 12px 12px 12px' }}>
                 <div style={{ position: 'relative' }}>
-                  <input 
-                    type="text" 
-                    placeholder="프로젝트 및 블록 검색..." 
+                  <input
+                    type="text"
+                    placeholder="프로젝트 및 블록 검색..."
                     value={lobbySearchQuery}
                     onChange={(e) => setLobbySearchQuery(e.target.value)}
-                    style={{ 
-                      width: '100%', 
-                      padding: '8px 12px 8px 32px', 
-                      borderRadius: '8px', 
-                      border: '1px solid rgba(255, 255, 255, 0.1)', 
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px 8px 32px',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
                       backgroundColor: 'rgba(0, 0, 0, 0.2)',
                       color: '#fff',
                       fontSize: '14px',
@@ -1822,7 +1822,7 @@ function App() {
                   />
                   <Search size={16} color="#888" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
                   {lobbySearchQuery && (
-                    <button 
+                    <button
                       onClick={() => setLobbySearchQuery('')}
                       style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '0', display: 'flex' }}
                     >
@@ -1845,13 +1845,13 @@ function App() {
                     </div>
                   ) : (
                     lobbySearchResults.map((result) => (
-                      <div 
+                      <div
                         key={result.id}
                         onClick={() => handleGlobalSearchResultClick(result)}
-                        style={{ 
-                          padding: '10px', 
-                          borderRadius: '8px', 
-                          cursor: 'pointer', 
+                        style={{
+                          padding: '10px',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
                           marginBottom: '8px',
                           backgroundColor: 'rgba(255, 255, 255, 0.03)',
                           border: '1px solid rgba(255, 255, 255, 0.05)',
@@ -1878,53 +1878,53 @@ function App() {
               ) : (
                 <>
                   <button className="new-chat-button" onClick={() => { setView('home'); setActiveChat(null); }}>
-                <Plus size={20} />
-                <span>새 채팅</span>
-              </button>
-              <div className="recent-history">
-                <div className="history-title">최근</div>
-                {historyItems.map((item, i) => (
-                  <div key={item.id ?? i} className="history-item-wrapper">
-                    {editingHistoryId === item.id ? (
-                      <div className="history-item history-item-editing">
-                        <MessageSquare size={18} />
-                        <input
-                          autoFocus
-                          className="history-rename-input"
-                          value={editingHistoryTitle}
-                          onChange={(e) => setEditingHistoryTitle(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleHistoryRenameSubmit(item.id);
-                            } else if (e.key === 'Escape') {
-                              e.preventDefault();
-                              setEditingHistoryId(null);
-                            }
-                          }}
-                          onBlur={() => handleHistoryRenameSubmit(item.id)}
-                          onClick={(e) => e.stopPropagation()}
-                        />
+                    <Plus size={20} />
+                    <span>새 채팅</span>
+                  </button>
+                  <div className="recent-history">
+                    <div className="history-title">최근</div>
+                    {historyItems.map((item, i) => (
+                      <div key={item.id ?? i} className="history-item-wrapper">
+                        {editingHistoryId === item.id ? (
+                          <div className="history-item history-item-editing">
+                            <MessageSquare size={18} />
+                            <input
+                              autoFocus
+                              className="history-rename-input"
+                              value={editingHistoryTitle}
+                              onChange={(e) => setEditingHistoryTitle(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleHistoryRenameSubmit(item.id);
+                                } else if (e.key === 'Escape') {
+                                  e.preventDefault();
+                                  setEditingHistoryId(null);
+                                }
+                              }}
+                              onBlur={() => handleHistoryRenameSubmit(item.id)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </div>
+                        ) : (
+                          <>
+                            <button className="history-item" onClick={() => enterProject(item)}>
+                              <MessageSquare size={18} />
+                              <span>{item.title}</span>
+                            </button>
+                            <button
+                              className={`history-item-menu-btn ${historyMenuOpenId === item.id ? 'active' : ''}`}
+                              onClick={(e) => handleHistoryMenuToggle(item, e)}
+                              aria-label="더보기"
+                            >
+                              <MoreVertical size={16} />
+                            </button>
+                          </>
+                        )}
                       </div>
-                    ) : (
-                      <>
-                        <button className="history-item" onClick={() => enterProject(item)}>
-                          <MessageSquare size={18} />
-                          <span>{item.title}</span>
-                        </button>
-                        <button
-                          className={`history-item-menu-btn ${historyMenuOpenId === item.id ? 'active' : ''}`}
-                          onClick={(e) => handleHistoryMenuToggle(item, e)}
-                          aria-label="더보기"
-                        >
-                          <MoreVertical size={16} />
-                        </button>
-                      </>
-                    )}
+                    ))}
                   </div>
-                ))}
-              </div>
-              </>
+                </>
               )}
             </div>
           </div>
@@ -1968,16 +1968,16 @@ function App() {
         <header className="top-bar">
           <div className="logo-text">Chat for Edu</div>
           <div className="user-controls">
-            <button 
-              className="icon-button tutorial-btn" 
-              style={{ marginRight: '16px' }} 
+            <button
+              className="icon-button tutorial-btn"
+              style={{ marginRight: '16px' }}
               title="사용 가이드 (튜토리얼)"
               onClick={() => alert('튜토리얼 준비 중입니다!')}
             >
               <BookOpen size={22} color="#5f6368" />
             </button>
             <div className="notification-wrapper" style={{ position: 'relative', width: '40px', height: '40px', marginRight: '16px' }}>
-              <button 
+              <button
                 className={`icon-button bell-btn ${quizTasks.some(t => t.status === 'generating') ? 'pulse' : ''}`}
                 onClick={() => setIsNotificationOpen(!isNotificationOpen)}
                 style={{ position: 'absolute', top: 0, left: 0, width: '40px', height: '40px', margin: 0 }}
@@ -1985,12 +1985,12 @@ function App() {
                 <Bell size={22} color={isNotificationOpen ? '#4285f4' : '#5f6368'} />
               </button>
               {quizTasks.length > 0 && (
-                <span 
-                  className="notification-badge" 
-                  style={{ 
-                    position: 'absolute', 
-                    top: '-2px', 
-                    right: '-2px', 
+                <span
+                  className="notification-badge"
+                  style={{
+                    position: 'absolute',
+                    top: '-2px',
+                    right: '-2px',
                     pointerEvents: 'none',
                     zIndex: 1
                   }}
@@ -2005,13 +2005,13 @@ function App() {
                   <div className="notif-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>알림</span>
                     {quizTasks.length > 0 && (
-                      <button 
+                      <button
                         onClick={() => setQuizTasks([])}
-                        style={{ 
-                          background: 'none', 
-                          border: 'none', 
-                          color: '#4285f4', 
-                          fontSize: '11px', 
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#4285f4',
+                          fontSize: '11px',
                           cursor: 'pointer',
                           fontWeight: 'normal',
                           padding: '4px 8px',
@@ -2030,20 +2030,20 @@ function App() {
                       <div className="notif-empty">새로운 알림이 없습니다.</div>
                     ) : (
                       quizTasks.map((task, i) => (
-                        <div 
-                          key={i} 
+                        <div
+                          key={i}
                           className={`notif-item ${task.status !== 'generating' ? 'clickable' : ''}`}
                           onClick={() => handleNotifClick(task)}
                         >
                           <div className="notif-icon">
-                            {task.status === 'generating' ? <Loader2 size={16} className="spinning-icon" /> : 
-                             task.status === 'completed' ? <Check size={16} color="#00c896" /> : <X size={16} color="#ff4d4d" />}
+                            {task.status === 'generating' ? <Loader2 size={16} className="spinning-icon" /> :
+                              task.status === 'completed' ? <Check size={16} color="#00c896" /> : <X size={16} color="#ff4d4d" />}
                           </div>
                           <div className="notif-content">
                             <div className="notif-title">{task.title}</div>
                             <div className="notif-desc">
-                              {task.status === 'generating' ? '퀴즈가 생성되는 중입니다...' : 
-                               task.status === 'completed' ? '퀴즈 생성이 완료되었습니다. (클릭하여 이동)' : '퀴즈 생성에 실패했습니다.'}
+                              {task.status === 'generating' ? '퀴즈가 생성되는 중입니다...' :
+                                task.status === 'completed' ? '퀴즈 생성이 완료되었습니다. (클릭하여 이동)' : '퀴즈 생성에 실패했습니다.'}
                             </div>
                           </div>
                         </div>
@@ -2105,7 +2105,7 @@ function App() {
                     onSaveDrawings={async (newDrawings) => {
                       if (!activeChat) return;
                       try {
-                        await fetch(`http://localhost:5000/api/chats/${activeChat.id}/drawings`, {
+                        await fetch(`/api/chats/${activeChat.id}/drawings`, {
                           method: 'PATCH',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ drawings: JSON.stringify(newDrawings) })
@@ -2113,11 +2113,11 @@ function App() {
                         // update activeChat local ref
                         const drawingsStr = JSON.stringify(newDrawings);
                         setActiveChat(prev => ({ ...prev, drawings: drawingsStr }));
-                        
+
                         // 사이드바 목록(historyItems)도 동기화하여 프로젝트 전환 시 데이터 유지
-                        setHistoryItems(prev => prev.map(item => 
-                          String(item.id) === String(activeChat.id) 
-                            ? { ...item, drawings: drawingsStr } 
+                        setHistoryItems(prev => prev.map(item =>
+                          String(item.id) === String(activeChat.id)
+                            ? { ...item, drawings: drawingsStr }
                             : item
                         ));
                       } catch (err) {
@@ -2156,8 +2156,8 @@ function App() {
                         ) : (
                           <div className="editable-title-wrapper">
                             <h3>{selectedNode.node_title || '(제목 없음)'}</h3>
-                            <button 
-                              className="edit-title-btn" 
+                            <button
+                              className="edit-title-btn"
                               onClick={() => {
                                 setEditedNodeTitle(selectedNode.node_title);
                                 setIsEditingNodeTitle(true);
@@ -2173,15 +2173,15 @@ function App() {
                         <X size={24} />
                       </button>
                     </div>
-                    
+
                     <div className="panel-scroll-area">
                       {/* 질문 (사용자 말풍선) */}
                       <div className="panel-message user">
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                           <span className="panel-message-label">{selectedNode.node_type === 'content' ? '메모' : '질문'}</span>
                           {selectedNode.node_type === 'content' && !isEditingMemo && (
-                            <button 
-                              className="edit-memo-btn" 
+                            <button
+                              className="edit-memo-btn"
                               onClick={() => {
                                 setEditedMemo(selectedNode.question_text);
                                 setIsEditingMemo(true);
@@ -2216,15 +2216,15 @@ function App() {
                               }}
                             />
                             <div className="memo-edit-actions" style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                              <button 
-                                className="memo-cancel-btn" 
+                              <button
+                                className="memo-cancel-btn"
                                 onClick={() => setIsEditingMemo(false)}
                                 style={{ background: 'rgba(255, 255, 255, 0.1)', border: 'none', color: '#ccc', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
                               >
                                 <X size={14} /> 취소
                               </button>
-                              <button 
-                                className="memo-save-btn" 
+                              <button
+                                className="memo-save-btn"
                                 onClick={handleMemoUpdate}
                                 style={{ background: '#4285f4', border: 'none', color: '#fff', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
                               >
@@ -2432,14 +2432,14 @@ function App() {
                                     <>
                                       <span>{q.title}</span>
                                       {q.status !== 'generating' && (
-                                        <Edit3 
-                                          size={14} 
-                                          style={{ cursor: 'pointer', opacity: 0.5 }} 
+                                        <Edit3
+                                          size={14}
+                                          style={{ cursor: 'pointer', opacity: 0.5 }}
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             setEditingQuizId(q.id);
                                             setEditingQuizTitle(q.title);
-                                          }} 
+                                          }}
                                         />
                                       )}
                                     </>
@@ -2456,9 +2456,9 @@ function App() {
                                   </div>
                                   {q.status === 'ready' && quizProgressMap[q.id] && quizProgressMap[q.id].userAnswers && (
                                     <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
-                                      <div style={{ 
-                                        height: '100%', 
-                                        background: quizProgressMap[q.id].quizState === 'result' ? '#00c896' : '#4285f4', 
+                                      <div style={{
+                                        height: '100%',
+                                        background: quizProgressMap[q.id].quizState === 'result' ? '#00c896' : '#4285f4',
                                         width: `${(quizProgressMap[q.id].userAnswers.filter(a => a !== '').length / Object.values(q.config.types).reduce((a, b) => a + b, 0)) * 100}%`,
                                         transition: 'width 0.3s ease'
                                       }}></div>
@@ -2618,9 +2618,9 @@ function App() {
                       {activeQuiz.data.map((q, i) => {
                         let isCorrect = false;
                         if (q.type === 'descriptive') {
-                           isCorrect = quizFeedback[i] && quizFeedback[i].score >= 70;
+                          isCorrect = quizFeedback[i] && quizFeedback[i].score >= 70;
                         } else {
-                           isCorrect = String(userAnswers[i]).trim().toLowerCase() === String(q.answer).trim().toLowerCase();
+                          isCorrect = String(userAnswers[i]).trim().toLowerCase() === String(q.answer).trim().toLowerCase();
                         }
                         return (
                           <div key={i} className={`result-card-v3 glass-panel-v3 ${isCorrect ? 'correct' : 'incorrect'}`}>
@@ -2651,14 +2651,14 @@ function App() {
                                 </div>
                               )}
                             </div>
-                            
+
                             {q.type === 'descriptive' && quizFeedback[i] && (
-                                <div className="res-explanation-v3" style={{ marginBottom: '16px' }}>
-                                  <label style={{ color: '#4285f4' }}>AI 피드백:</label>
-                                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                                    {sanitizeMarkdown(quizFeedback[i].feedback)}
-                                  </ReactMarkdown>
-                                </div>
+                              <div className="res-explanation-v3" style={{ marginBottom: '16px' }}>
+                                <label style={{ color: '#4285f4' }}>AI 피드백:</label>
+                                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                  {sanitizeMarkdown(quizFeedback[i].feedback)}
+                                </ReactMarkdown>
+                              </div>
                             )}
 
                             <div className="res-explanation-v3">
@@ -2726,10 +2726,10 @@ function App() {
                             </div>
                             <div className="block-content">
                               {n.photo_url && (
-                                <img 
-                                  src={`http://localhost:5000${n.photo_url}`} 
-                                  alt="Node context" 
-                                  className="summary-image" 
+                                <img
+                                  src={`${n.photo_url}`}
+                                  alt="Node context"
+                                  className="summary-image"
                                 />
                               )}
                               <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
@@ -2754,10 +2754,10 @@ function App() {
                               </div>
                               <div className="block-content">
                                 {n.photo_url && (
-                                  <img 
-                                    src={`http://localhost:5000${n.photo_url}`} 
-                                    alt="Node context" 
-                                    className="summary-image" 
+                                  <img
+                                    src={`${n.photo_url}`}
+                                    alt="Node context"
+                                    className="summary-image"
                                   />
                                 )}
                                 <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
@@ -2842,10 +2842,10 @@ function App() {
                     <div className="node-content-body">
                       {selectedNode.photo_url && (
                         <div className="node-image-display">
-                          <img 
-                            src={`http://localhost:5000${selectedNode.photo_url}`} 
-                            alt="Q" 
-                            onClick={() => setEnlargedImage(`http://localhost:5000${selectedNode.photo_url}`)}
+                          <img
+                            src={`${selectedNode.photo_url}`}
+                            alt="Q"
+                            onClick={() => setEnlargedImage(`${selectedNode.photo_url}`)}
                             style={{ cursor: 'zoom-in' }}
                           />
                         </div>
@@ -2854,8 +2854,8 @@ function App() {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                           <div className="section-label">{selectedNode.node_type === 'content' ? '메모 내용' : '질문'}</div>
                           {selectedNode.node_type === 'content' && !isEditingMemo && (
-                            <button 
-                              className="edit-memo-btn" 
+                            <button
+                              className="edit-memo-btn"
                               onClick={() => {
                                 setEditedMemo(selectedNode.question_text);
                                 setIsEditingMemo(true);
@@ -2890,15 +2890,15 @@ function App() {
                               }}
                             />
                             <div className="memo-edit-actions" style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                              <button 
-                                className="memo-cancel-btn" 
+                              <button
+                                className="memo-cancel-btn"
                                 onClick={() => setIsEditingMemo(false)}
                                 style={{ background: 'rgba(255, 255, 255, 0.1)', border: 'none', color: '#ccc', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
                               >
                                 <X size={16} /> 취소
                               </button>
-                              <button 
-                                className="memo-save-btn" 
+                              <button
+                                className="memo-save-btn"
                                 onClick={handleMemoUpdate}
                                 style={{ background: '#4285f4', border: 'none', color: '#fff', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
                               >
@@ -2966,8 +2966,8 @@ function App() {
                 <div className="drawing-toolbar-wrapper" style={{ alignSelf: 'flex-start', marginLeft: '16px' }}>
                   <div className="drawing-tools-bar">
                     <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                      <button 
-                        className={`tool-btn ${isDrawingMode && drawingTool === 'pen' ? 'active' : ''}`} 
+                      <button
+                        className={`tool-btn ${isDrawingMode && drawingTool === 'pen' ? 'active' : ''}`}
                         onClick={() => {
                           if (activeColorPicker === 'pen') {
                             setActiveColorPicker(null);
@@ -2977,7 +2977,7 @@ function App() {
                             setDrawingTool('pen');
                             setActiveColorPicker('pen');
                           }
-                        }} 
+                        }}
                         title="펜 (클릭하여 색상 선택)"
                       >
                         <Pencil size={18} style={{ color: penColor }} />
@@ -2991,7 +2991,7 @@ function App() {
                           backdropFilter: 'blur(10px)'
                         }}>
                           {PRESET_COLORS.map(color => (
-                            <div 
+                            <div
                               key={color}
                               onClick={() => { setPenColor(color); setActiveColorPicker(null); }}
                               style={{
@@ -3007,8 +3007,8 @@ function App() {
                     </div>
 
                     <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                      <button 
-                        className={`tool-btn ${isDrawingMode && drawingTool === 'highlighter' ? 'active' : ''}`} 
+                      <button
+                        className={`tool-btn ${isDrawingMode && drawingTool === 'highlighter' ? 'active' : ''}`}
                         onClick={() => {
                           if (activeColorPicker === 'highlighter') {
                             setActiveColorPicker(null);
@@ -3018,7 +3018,7 @@ function App() {
                             setDrawingTool('highlighter');
                             setActiveColorPicker('highlighter');
                           }
-                        }} 
+                        }}
                         title="형광펜 (클릭하여 색상 선택)"
                       >
                         <Highlighter size={18} style={{ color: highlighterColor }} />
@@ -3032,7 +3032,7 @@ function App() {
                           backdropFilter: 'blur(10px)'
                         }}>
                           {PRESET_COLORS.map(color => (
-                            <div 
+                            <div
                               key={color}
                               onClick={() => { setHighlighterColor(color); setActiveColorPicker(null); }}
                               style={{
@@ -3047,8 +3047,8 @@ function App() {
                         </div>
                       )}
                     </div>
-                    <button 
-                      className={`tool-btn ${isDrawingMode && drawingTool === 'eraser' ? 'active' : ''}`} 
+                    <button
+                      className={`tool-btn ${isDrawingMode && drawingTool === 'eraser' ? 'active' : ''}`}
                       onClick={() => {
                         setActiveColorPicker(null); // 다른 색상 창 닫기
                         if (drawingTool === 'eraser' && isDrawingMode) {
@@ -3057,26 +3057,26 @@ function App() {
                           setIsDrawingMode(true);
                           setDrawingTool('eraser');
                         }
-                      }} 
+                      }}
                       title="지우개"
                     >
                       <Eraser size={18} />
                     </button>
                     <div className="tool-divider" />
-                    <button 
-                      className="tool-btn" 
+                    <button
+                      className="tool-btn"
                       onClick={() => {
-                        if(window.confirm('모든 필기를 지우시겠습니까?')) {
+                        if (window.confirm('모든 필기를 지우시겠습니까?')) {
                           setDrawings([]);
                           if (activeChat) {
-                            fetch(`http://localhost:5000/api/chats/${activeChat.id}/drawings`, {
+                            fetch(`/api/chats/${activeChat.id}/drawings`, {
                               method: 'PATCH',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({ drawings: JSON.stringify([]) })
                             });
                           }
                         }
-                      }} 
+                      }}
                       title="전체 삭제"
                     >
                       <X size={18} />
@@ -3084,165 +3084,165 @@ function App() {
                   </div>
                 </div>
               )}
-              
+
               <div className={`input-container ${isGenerating ? 'disabled' : ''}`}>
                 {imagePreviewUrl && (
                   <div className="image-preview-container" style={{ paddingLeft: '4px', paddingBottom: '4px' }}>
                     <div className="preview-bubble"><img src={imagePreviewUrl} alt="p" /><button className="remove-image-btn" onClick={clearImage}><X size={14} /></button></div>
                   </div>
                 )}
-              <textarea
-                ref={textareaRef}
-                className="input-field"
-                placeholder={isGenerating ? "답변을 생성하는 중입니다..." : "Chat for Edu에게 물어보기"}
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onPaste={handlePaste}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
-                }}
-                disabled={isGenerating}
-                rows={1}
-              />
-              <div className="input-actions">
-                <div className="input-actions-left">
-                  <label htmlFor="file-upload-input" style={{ cursor: isGenerating ? 'not-allowed' : 'pointer' }}>
-                    <Paperclip size={20} style={{ opacity: isGenerating ? 0.5 : 1 }} />
-                    <input 
-                      id="file-upload-input" 
-                      type="file" 
-                      accept="image/*" 
-                      style={{ display: 'none' }} 
-                      onClick={(e) => { e.target.value = null; }}
-                      onChange={(e) => processImageFile(e.target.files[0])} 
-                      disabled={isGenerating} 
-                    />
-                  </label>
-
-                  {/* AI 모델 선택 박스 (Premium Custom Dropdown) */}
-                  {availableModels.length > 0 && (
-                    <div className="model-selector-container" ref={modelSelectorRef}>
-                      <button 
-                        className={`model-selector-trigger ${isModelSelectorOpen ? 'active' : ''}`}
-                        onClick={() => !isGenerating && setIsModelSelectorOpen(!isModelSelectorOpen)}
+                <textarea
+                  ref={textareaRef}
+                  className="input-field"
+                  placeholder={isGenerating ? "답변을 생성하는 중입니다..." : "Chat for Edu에게 물어보기"}
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onPaste={handlePaste}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                  disabled={isGenerating}
+                  rows={1}
+                />
+                <div className="input-actions">
+                  <div className="input-actions-left">
+                    <label htmlFor="file-upload-input" style={{ cursor: isGenerating ? 'not-allowed' : 'pointer' }}>
+                      <Paperclip size={20} style={{ opacity: isGenerating ? 0.5 : 1 }} />
+                      <input
+                        id="file-upload-input"
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onClick={(e) => { e.target.value = null; }}
+                        onChange={(e) => processImageFile(e.target.files[0])}
                         disabled={isGenerating}
-                      >
-                        <Sparkles size={14} className="gemini-icon" />
-                        <span className="selected-model-name">
-                          {availableModels.find(m => m.id === selectedModelId)?.name || 'Model Select'}
-                        </span>
-                        <ChevronDown size={14} className={`arrow-icon ${isModelSelectorOpen ? 'rotated' : ''}`} />
-                      </button>
+                      />
+                    </label>
 
-                      {isModelSelectorOpen && (
-                        <div className="model-selector-popup fade-up-element">
-                          <div className="model-popup-header">AI 모델 선택</div>
-                          <div className="model-popup-list">
-                            {availableModels.map(model => (
-                              <button
-                                key={model.id}
-                                className={`model-item-btn ${selectedModelId === model.id ? 'active' : ''}`}
-                                onClick={() => {
-                                  handleModelChange(model.id);
-                                  setIsModelSelectorOpen(false);
-                                }}
-                              >
-                                <div className="model-item-info">
-                                  <span className="model-name">{model.name}</span>
-                                  {selectedModelId === model.id && <Sparkles size={12} fill="currentColor" />}
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="input-actions-right">
-                  {view === 'project' && (
-                    <>
-                      <div className="current-node-context-wrapper" ref={contextSelectorRef}>
-                        {isContextSelectorOpen && !isGenerating && (
-                          <div className="context-selector-popup">
-                            <div className="context-popup-header">부모 노드 선택</div>
-                            <div className="context-popup-list">
-                              {nodes.map(n => (
+                    {/* AI 모델 선택 박스 (Premium Custom Dropdown) */}
+                    {availableModels.length > 0 && (
+                      <div className="model-selector-container" ref={modelSelectorRef}>
+                        <button
+                          className={`model-selector-trigger ${isModelSelectorOpen ? 'active' : ''}`}
+                          onClick={() => !isGenerating && setIsModelSelectorOpen(!isModelSelectorOpen)}
+                          disabled={isGenerating}
+                        >
+                          <Sparkles size={14} className="gemini-icon" />
+                          <span className="selected-model-name">
+                            {availableModels.find(m => m.id === selectedModelId)?.name || 'Model Select'}
+                          </span>
+                          <ChevronDown size={14} className={`arrow-icon ${isModelSelectorOpen ? 'rotated' : ''}`} />
+                        </button>
+
+                        {isModelSelectorOpen && (
+                          <div className="model-selector-popup fade-up-element">
+                            <div className="model-popup-header">AI 모델 선택</div>
+                            <div className="model-popup-list">
+                              {availableModels.map(model => (
                                 <button
-                                  key={n.id}
-                                  className={`context-list-item ${contextNode?.id === n.id ? 'active' : ''}`}
+                                  key={model.id}
+                                  className={`model-item-btn ${selectedModelId === model.id ? 'active' : ''}`}
                                   onClick={() => {
-                                    setContextNode(n);
-                                    setIsContextSelectorOpen(false);
+                                    handleModelChange(model.id);
+                                    setIsModelSelectorOpen(false);
                                   }}
                                 >
-                                  <span className="item-label" title={n.node_label}>{getDisplayLabel(n.node_label)}</span>
-                                  <span className="item-title">{n.node_title}</span>
+                                  <div className="model-item-info">
+                                    <span className="model-name">{model.name}</span>
+                                    {selectedModelId === model.id && <Sparkles size={12} fill="currentColor" />}
+                                  </div>
                                 </button>
                               ))}
                             </div>
                           </div>
                         )}
-                        <button
-                          className="current-node-context-inline clickable"
-                          onClick={() => !isGenerating && setIsContextSelectorOpen(!isContextSelectorOpen)}
-                          disabled={isGenerating}
-                          style={{ opacity: isGenerating ? 0.5 : 1 }}
-                        >
-                          {contextNode?.node_label || 'Root'}
-                        </button>
                       </div>
-
-
-
-                      {selectedNode && (
-                        <>
+                    )}
+                  </div>
+                  <div className="input-actions-right">
+                    {view === 'project' && (
+                      <>
+                        <div className="current-node-context-wrapper" ref={contextSelectorRef}>
+                          {isContextSelectorOpen && !isGenerating && (
+                            <div className="context-selector-popup">
+                              <div className="context-popup-header">부모 노드 선택</div>
+                              <div className="context-popup-list">
+                                {nodes.map(n => (
+                                  <button
+                                    key={n.id}
+                                    className={`context-list-item ${contextNode?.id === n.id ? 'active' : ''}`}
+                                    onClick={() => {
+                                      setContextNode(n);
+                                      setIsContextSelectorOpen(false);
+                                    }}
+                                  >
+                                    <span className="item-label" title={n.node_label}>{getDisplayLabel(n.node_label)}</span>
+                                    <span className="item-title">{n.node_title}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           <button
-                            className={`smart-btn-inline ${activeIcons.next ? 'active' : ''}`}
-                            title="세부 질문"
-                            onClick={() => !isGenerating && toggleSmartIcon('next')}
+                            className="current-node-context-inline clickable"
+                            onClick={() => !isGenerating && setIsContextSelectorOpen(!isContextSelectorOpen)}
                             disabled={isGenerating}
+                            style={{ opacity: isGenerating ? 0.5 : 1 }}
                           >
-                            <CornerDownRight size={18} />
+                            {contextNode?.node_label || 'Root'}
                           </button>
-                          <button
-                            className={`smart-btn-inline ${activeIcons.node ? 'active' : ''}`}
-                            title="새 노드"
-                            onClick={() => !isGenerating && toggleSmartIcon('node')}
-                            disabled={isGenerating}
-                          >
-                            <SquarePlus size={18} />
-                          </button>
-                        </>
-                      )}
+                        </div>
 
-                      <button
-                        className={`smart-btn-inline ${activeIcons.sparkle ? 'active' : ''}`}
-                        title="새로운 시작"
-                        onClick={() => !isGenerating && toggleSmartIcon('sparkle')}
-                        disabled={isGenerating}
-                      >
-                        <Sparkles size={18} />
-                      </button>
-                    </>
-                  )}
-                  <button
-                    className="icon-button send-btn-main"
-                    onClick={handleSendMessage}
-                    disabled={isGenerating || (!inputText.trim() && !selectedImage)}
-                    style={{ opacity: (isGenerating || (!inputText.trim() && !selectedImage)) ? 0.5 : 1 }}
-                  >
-                    {isGenerating ? <Loader2 size={20} className="spinning-icon" /> : <Send size={20} />}
-                  </button>
+
+
+                        {selectedNode && (
+                          <>
+                            <button
+                              className={`smart-btn-inline ${activeIcons.next ? 'active' : ''}`}
+                              title="세부 질문"
+                              onClick={() => !isGenerating && toggleSmartIcon('next')}
+                              disabled={isGenerating}
+                            >
+                              <CornerDownRight size={18} />
+                            </button>
+                            <button
+                              className={`smart-btn-inline ${activeIcons.node ? 'active' : ''}`}
+                              title="새 노드"
+                              onClick={() => !isGenerating && toggleSmartIcon('node')}
+                              disabled={isGenerating}
+                            >
+                              <SquarePlus size={18} />
+                            </button>
+                          </>
+                        )}
+
+                        <button
+                          className={`smart-btn-inline ${activeIcons.sparkle ? 'active' : ''}`}
+                          title="새로운 시작"
+                          onClick={() => !isGenerating && toggleSmartIcon('sparkle')}
+                          disabled={isGenerating}
+                        >
+                          <Sparkles size={18} />
+                        </button>
+                      </>
+                    )}
+                    <button
+                      className="icon-button send-btn-main"
+                      onClick={handleSendMessage}
+                      disabled={isGenerating || (!inputText.trim() && !selectedImage)}
+                      style={{ opacity: (isGenerating || (!inputText.trim() && !selectedImage)) ? 0.5 : 1 }}
+                    >
+                      {isGenerating ? <Loader2 size={20} className="spinning-icon" /> : <Send size={20} />}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
         {/* 계정 탈퇴 확인 모달 */}
         {isDeleteModalOpen && (
