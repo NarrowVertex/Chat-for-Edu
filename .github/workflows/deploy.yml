@@ -56,10 +56,10 @@ jobs:
           # echo "-----END RSA PRIVATE KEY-----" >> ./lightsail.pem
 
           # 4. SSH 키 출력
-          cat ./lightsail.pem
+          # cat ./lightsail.pem
           
           # 4. [강력 조치] 소유자 외에는 읽기/쓰기/실행을 아예 못하도록 강력하게 400 권한을 다시 먹입니다.
-          # chmod 400 ./lightsail.pem
+          chmod 400 ./lightsail.pem
           
           # (선택 사항) 권한이 제대로 바뀌었는지 로그로 확인하기 위한 안전장치
           # ls -l ./lightsail.pem
