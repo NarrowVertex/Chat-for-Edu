@@ -43,9 +43,8 @@ jobs:
           # AWS API를 통해 임시 접속 세션 정보를 가져옵니다.
           aws lightsail get-instance-access-details --instance-name "$INSTANCE_NAME" > access_details.json
           
-          # [수정포인트] 기존 privateKeyHex + xxd 조합 대신, 
-          # 표준 Base64로 인코딩된 privateKey 값을 가져와서 복호화합니다. (에러 방지 정석)
-          jq -r '.accessDetails.privateKey' access_details.json | base64 --decode > lightsail_key.pem
+          # [수정] privateKey는 이미 평문 PEM 형식이므로 base64 디코딩 없이 바로 저장합니다.
+          jq -r '.accessDetails.privateKey' access_details.json > lightsail_key.pem
           
           # 키 파일 권한을 소유자 전용 읽기로 엄격하게 제한 (SSH 필수 요구사항)
           chmod 400 lightsail_key.pem
