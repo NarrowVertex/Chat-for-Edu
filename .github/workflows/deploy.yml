@@ -59,10 +59,10 @@ jobs:
           cat ./lightsail.pem
           
           # 4. [강력 조치] 소유자 외에는 읽기/쓰기/실행을 아예 못하도록 강력하게 400 권한을 다시 먹입니다.
-          chmod 400 ./lightsail.pem
+          # chmod 400 ./lightsail.pem
           
           # (선택 사항) 권한이 제대로 바뀌었는지 로그로 확인하기 위한 안전장치
-          ls -l ./lightsail.pem
+          # ls -l ./lightsail.pem
 
       # 4. 빌드된 프론트엔드 파일 전송 (SCP)
       - name: 7. Transfer frontend build files to Lightsail
@@ -72,5 +72,21 @@ jobs:
       - name: 8. Execute Remote Commands via SSH
         run: |
           ssh -i ./lightsail.pem -T -q -o StrictHostKeyChecking=no ubuntu@${{ env.INSTANCE_IP }} << 'EOF'
-            echo "IAM Role-based Deployment completed perfectly!" >> ./success.txt
+            cd ~/Chat-for-Edu
+            git fetch origin main
+            git checkout main
+            git pull origin main
+
+            cd backend
+            npm ci --only=production
+            
+            # 프로세스 및 웹서버 재시작
+            pm2 restart backend-process
+            sudo systemctl restart nginx
           EOF
+
+      # 6. 사용한 임시 키 및 메타데이터 삭제 (보안 정리)
+      - name: 9. Clean up temporary credentials
+        if: always() 
+        run: |
+          rm -f ./lightsail.pem
