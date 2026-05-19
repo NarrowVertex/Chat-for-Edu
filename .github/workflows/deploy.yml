@@ -53,7 +53,7 @@ jobs:
           USERNAME=$(echo "$ACCESS_DETAILS" | jq -r '.username')
           
           # 줄바꿈(\n)이 포함된 키 텍스트를 깨짐 없이 원래 포맷 그대로 저장합니다.
-          echo "$ACCESS_DETAILS" | jq -r '.privateKeyText' > lightsail_tmp_key
+          printf "%b" "$(echo "$ACCESS_DETAILS" | jq -r '.privateKeyText')" > lightsail_tmp_key
 
           # 3. 임시 키 파일 권한 변경 (SSH 필수 보안 설정)
           chmod 400 lightsail_tmp_key
