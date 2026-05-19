@@ -5,68 +5,19 @@ on:
     branches:
       - main
 
-# OIDC 토큰 발급을 위해 필수적인 권한 설정
 permissions:
   id-token: write
-  contents: read
-
+  
 jobs:
-  deploy:
+  run_job_with_aws:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-
-      # 1. 외부(GA)에서 프론트엔드 빌드 수행
-      - name: Install dependencies and build frontend
-        run: |
-          cd frontend
-          npm i
-          npm i -D terser
-          npm run build
-
-      # 2. AWS OIDC 기반 IAM Role 자격 증명 설정 (액세스 키가 필요 없음)
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
           role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Connect and Execute Command using Dynamic IAM Credentials
+      - name: Additional steps
         run: |
-          # 1. AWS API를 통해 임시 접속 정보 요청
-          echo "임시 SSH 인증 정보 요청 중..."
-          ACCESS_DETAILS=$(aws lightsail get-instance-access-details \
-            --instance-name "${{ secrets.LIGHTSAIL_INSTANCE_NAME }}" \
-            --protocol ssh \
-            --query "accessDetails" \
-            --output json)
-
-          # 2. 응답 데이터에서 IP, 유저명 추출 및 임시 프라이빗 키 파일 안전하게 생성
-          INSTANCE_IP=$(echo "$ACCESS_DETAILS" | jq -r '.ipAddress')
-          USERNAME=$(echo "$ACCESS_DETAILS" | jq -r '.username')
-          
-          # 줄바꿈(\n)이 포함된 키 텍스트를 깨짐 없이 원래 포맷 그대로 저장합니다.
-          printf "%b" "$(echo "$ACCESS_DETAILS" | jq -r '.privateKeyText')" > lightsail_tmp_key
-
-          # 3. 임시 키 파일 권한 변경 (SSH 필수 보안 설정)
-          chmod 400 lightsail_tmp_key
-
-          # 4. SSH 접속 후 명령어 실행 (Pseudo-terminal 경고 방지를 위해 -T 옵션 추가)
-          echo "인스턴스($INSTANCE_IP)에 접속하여 명령어를 실행합니다."
-          ssh -T -i lightsail_tmp_key -o StrictHostKeyChecking=no "${USERNAME}@${INSTANCE_IP}" << 'EOF'
-            echo "Hello from GitHub Actions using IAM Role!"
-            uname -a
-          EOF
-
-      # 6. 사용한 임시 키 및 메타데이터 삭제 (보안 정리)
-      - name: Clean up temporary credentials
-        if: always() 
-        run: |
-          rm -f lightsail_tmp_key
+          # Your commands that require AWS credentials
+          aws sts get-caller-identity
