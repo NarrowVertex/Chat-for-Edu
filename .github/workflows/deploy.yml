@@ -27,7 +27,7 @@ jobs:
       - name: 3. Download Lightsail Key Pair
         run: |
           aws lightsail download-default-key-pair
-          mv ~/.aws/lightsailDefaultKey.pem ./lightsail.pem
+          mv ./*.pem ./lightsail.pem
           chmod 400 ./lightsail.pem
 
       - name: 4. Execute Remote Commands via SSH
