@@ -59,23 +59,13 @@ jobs:
           
           echo "인스턴스에 임시 키가 등록될 때까지 15초간 대기합니다..."
           sleep 15
-
-          # SSH 접속이 가능한지 최대 3번 확인해봅니다.
-          for i in {1..3}; do
-            echo "SSH 접속 시도 중... ($i/3)"
-            if ssh -i lightsail_key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=5 $USERNAME@$IP "echo 'SSH Connection Success!'" ; then
-              echo "접속 성공!"
-              exit 0
-            fi
-            echo "아직 키가 등록되지 않았습니다. 10초 후 재시도합니다..."
-            sleep 10
-          done
-          echo "SSH 접속에 실패했습니다. 유저명($USERNAME)이나 인스턴스 상태를 확인하세요."
-          exit 1
       
       # 4. 빌드된 프론트엔드 파일 전송 (SCP)
       - name: Deploy Build Files to Lightsail (using SCP)
         run: |
+          # 원격지에 목적지 폴더가 없을 경우를 대비해 미리 폴더를 생성합니다.
+          ssh -i lightsail_key.pem -o StrictHostKeyChecking=no $USERNAME@$IP "mkdir -p ~/Chat-for-Edu/frontend/dist"
+          
           rsync -avz -e "ssh -i lightsail_key.pem -o StrictHostKeyChecking=no" \
             frontend/dist/ \
             $USERNAME@$IP:~/Chat-for-Edu/frontend/dist/
