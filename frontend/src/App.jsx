@@ -12,6 +12,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import NodeTreeView from './NodeTreeView';
+import TutorialOverlay from './components/TutorialOverlay';
 
 // AI 답변에서 가끔 섞여 들어오는 <br> 류 HTML 태그를 마크다운 줄바꿈으로 치환
 const sanitizeMarkdown = (text) => {
@@ -23,6 +24,7 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [view, setView] = useState('login'); // 'login', 'home', 'project'
   const [viewMode, setViewMode] = useState('chat'); // 'chat' or 'node'
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
 
   const [historyItems, setHistoryItems] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
@@ -1972,7 +1974,7 @@ function App() {
               className="icon-button tutorial-btn"
               style={{ marginRight: '16px' }}
               title="사용 가이드 (튜토리얼)"
-              onClick={() => alert('튜토리얼 준비 중입니다!')}
+              onClick={() => setIsTutorialOpen(true)}
             >
               <BookOpen size={22} color="#5f6368" />
             </button>
@@ -3313,6 +3315,8 @@ function App() {
             </div>
           </div>
         )}
+
+        <TutorialOverlay isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />
       </main>
     </div>
   );
