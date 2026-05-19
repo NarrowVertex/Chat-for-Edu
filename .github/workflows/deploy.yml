@@ -12,12 +12,40 @@ jobs:
   run_job_with_aws:
     runs-on: ubuntu-latest
     steps:
-      - name: Configure AWS Credentials
+      - name: 1. Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
           role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
-      - name: Additional steps
+          
+      - name: 2. Lightsail 인스턴스 제어 및 STS 토큰 발급
         run: |
-          # Your commands that require AWS credentials
-          aws sts get-caller-identity
+          # 1. STS를 통해 임시 자격 증명 요청 (Secrets 변수 적용)
+          CREDENTIALS=$(aws sts assume-role \
+            --role-arn "${{ secrets.AWS_IAM_ROLE_ARN }}" \
+            --role-session-name "${{ secrets.LIGHTSAIL_INSTANCE_NAME }}" \
+            --query "Credentials.[AccessKeyId,SecretAccessKey,SessionToken]" \
+            --output text)
+          
+          # 2. 발급받은 임시 키를 환경 변수에 매핑
+          export AWS_ACCESS_KEY_ID=$(echo $CREDENTIALS | awk '{print $1}')
+          export AWS_SECRET_ACCESS_KEY=$(echo $CREDENTIALS | awk '{print $2}')
+          export AWS_SESSION_TOKEN=$(echo $CREDENTIALS | awk '{print $3}')
+
+      # 3. Lightsail 인스턴스의 Public IP 주소 동적 추출
+      - name: 3. Get Lightsail Instance IP
+        run: |
+          INSTANCE_IP=$(aws lightsail get-instance --instance-name "${{ secrets.LIGHTSAIL_INSTANCE_NAME }}" --query "instance.publicIpAddress" --output text)
+          echo "INSTANCE_IP=$INSTANCE_IP" >> $GITHUB_ENV
+
+      # 4. Lightsail의 SSH Key 다운로드 (또는 GitHub Secrets에 저장해둔 Key 사용)
+      - name: 4. Download Lightsail Key Pair
+        run: |
+          aws lightsail download-default-key-pair
+          mv ~/.aws/lightsailDefaultKey.pem ./lightsail.pem
+          chmod 400 ./lightsail.pem
+
+      # 5. 원격 명령어 실행 (SSH)
+      - name: 5. Execute Remote Commands via SSH
+        run: |
+          ssh -i ./lightsail.pem -o StrictHostKeyChecking=no ubuntu@${{ env.INSTANCE_IP }} "ls"
