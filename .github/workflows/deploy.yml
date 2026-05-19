@@ -23,6 +23,7 @@ jobs:
         run: |
           cd frontend
           npm i
+          npm i -D terser
           npm run build
 
       # 2. AWS IAM 자격 증명 설정
