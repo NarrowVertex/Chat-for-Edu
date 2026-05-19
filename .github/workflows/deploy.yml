@@ -12,19 +12,36 @@ permissions:
 jobs:
   run_job_with_aws:
     runs-on: ubuntu-latest
+    
     steps:
-      - name: 1. Configure AWS Credentials
+      - name: 1. Checkout code
+        uses: actions/checkout@v4
+
+      - name: 2. Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # 1. 외부(GA)에서 프론트엔드 빌드 수행
+      - name: 3. Install dependencies and build frontend
+        run: |
+          cd frontend
+          npm i
+          npm i -D terser
+          npm run build
+      
+      - name: 4. Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
           role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
           
-      - name: 2. Get Lightsail Instance IP
+      - name: 5. Get Lightsail Instance IP
         run: |
           INSTANCE_IP=$(aws lightsail get-instance --instance-name "${{ secrets.LIGHTSAIL_INSTANCE_NAME }}" --query "instance.publicIpAddress" --output text)
           echo "INSTANCE_IP=$INSTANCE_IP" >> $GITHUB_ENV
 
-      - name: 3. Download Lightsail Key Pair
+      - name: 6. Download Lightsail Key Pair
         run: |
           # 1. AWS로부터 비밀키 텍스트를 가져옵니다.
           RAW_KEY=$(aws lightsail download-default-key-pair --query "privateKeyBase64" --output text)
@@ -47,7 +64,12 @@ jobs:
           # (선택 사항) 권한이 제대로 바뀌었는지 로그로 확인하기 위한 안전장치
           ls -l ./lightsail.pem
 
-      - name: 4. Execute Remote Commands via SSH
+      # 4. 빌드된 프론트엔드 파일 전송 (SCP)
+      - name: 7. Transfer frontend build files to Lightsail
+        run: |
+          scp -i ./lightsail_key.pem -o StrictHostKeyChecking=no -r frontend/dist/* ubuntu@${{ env.INSTANCE_IP }}:~/Chat-for-Edu/frontend/dist/
+
+      - name: 7. Execute Remote Commands via SSH
         run: |
           ssh -i ./lightsail.pem -o StrictHostKeyChecking=no ubuntu@${{ env.INSTANCE_IP }} << 'EOF'
             echo "IAM Role-based Deployment completed perfectly!" >> ./success.txt
