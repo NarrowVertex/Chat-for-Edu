@@ -5,19 +5,84 @@ on:
     branches:
       - main
 
+# OIDC 토큰 발급을 위해 필수적인 권한 설정
 permissions:
   id-token: write
-  
+  contents: read
+
 jobs:
-  run_job_with_aws:
+  deploy:
     runs-on: ubuntu-latest
+
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # 1. 외부(GA)에서 프론트엔드 빌드 수행
+      - name: Install dependencies and build frontend
+        run: |
+          cd frontend
+          npm i
+          npm i -D terser
+          npm run build
+
+      # 2. AWS OIDC 기반 IAM Role 자격 증명 설정 (액세스 키가 필요 없음)
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v6.1.0
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_IAM_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
-      - name: Additional steps
+
+      # 3. AWS API로 임시 접속 자격 증명 가져오기
+      - name: Get Lightsail Access Details
+        id: lightsail_auth
+        env:
+          INSTANCE_NAME: ${{ secrets.LIGHTSAIL_INSTANCE_NAME }} 
         run: |
-          # Your commands that require AWS credentials
-          aws sts get-caller-identity
+          # AWS API를 통해 임시 접속 세션 정보를 가져옵니다.
+          aws lightsail get-instance-access-details --instance-name "$INSTANCE_NAME" > access_details.json
+          
+          # privateKey는 평문 PEM 형식이므로 바로 저장합니다.
+          jq -r '.accessDetails.privateKey' access_details.json > lightsail_key.pem
+          
+          # 키 파일 권한 제한
+          chmod 400 lightsail_key.pem
+          
+          # IP와 유저네임을 환경 변수로 내보내기
+          echo "IP=$(jq -r '.accessDetails.ipAddress' access_details.json)" >> $GITHUB_ENV
+          echo "USERNAME=$(jq -r '.accessDetails.username' access_details.json)" >> $GITHUB_ENV
+
+      # 4. 빌드된 프론트엔드 파일 전송 (SCP)
+      - name: Transfer frontend build files to Lightsail
+        run: |
+          scp -i lightsail_key.pem -o StrictHostKeyChecking=no -r frontend/dist/* ${USERNAME}@${IP}:~/Chat-for-Edu/frontend/dist/
+
+      # 5. 서버 백엔드 후처리 및 서비스 재시작 (SSH)
+      - name: Execute remote ssh commands to deploy
+        run: |
+          ssh -i lightsail_key.pem -o StrictHostKeyChecking=no ${USERNAME}@${IP} << 'EOF'
+            cd ~/Chat-for-Edu
+            git fetch origin main
+            git checkout main
+            git pull origin main
+            
+            cd backend
+            npm ci --only=production
+            
+            # 프로세스 및 웹서버 재시작
+            pm2 restart backend-process
+            sudo systemctl restart nginx
+            
+            echo "IAM Role-based Deployment completed perfectly!"
+          EOF
+
+      # 6. 사용한 임시 키 및 메타데이터 삭제 (보안 정리)
+      - name: Clean up temporary credentials
+        if: always() 
+        run: |
+          rm -f lightsail_key.pem access_details.json
