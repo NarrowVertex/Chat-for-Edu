@@ -1,0 +1,69 @@
+name: Deploy to AWS Lightsail
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # 1. 외부(GA)에서 프론트엔드 빌드 수행 (SaaS 서버 부하 방지)
+      - name: Install dependencies and build frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      # 2. 서버에서 Git Pull 진행 (백엔드 코드 및 기타 설정 갱신)
+      - name: Repository update at Lightsail
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LIGHTSAIL_INSTANCE_IP }}
+          username: ${{ secrets.LIGHTSAIL_INSTANCE_USERNAME }}
+          key: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          script: |
+            cd ~/Chat-for-Edu
+            git fetch origin main
+            git checkout main
+            git pull origin main
+
+      # 3. GA에서 빌드 완료된 dist 파일만 서버로 안전하게 전송
+      - name: Transfer build files to Lightsail
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.LIGHTSAIL_INSTANCE_IP }}
+          username: ${{ secrets.LIGHTSAIL_INSTANCE_USERNAME }}
+          key: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          source: "frontend/dist/**"
+          target: "~/Chat-for-Edu"
+
+      # 4. 백엔드 후처리 및 서비스 재시작
+      - name: Run deploy script on Lightsail
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LIGHTSAIL_INSTANCE_IP }}
+          username: ${{ secrets.LIGHTSAIL_INSTANCE_USERNAME }}
+          key: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
+          script: |
+            cd ~/Chat-for-Edu/backend
+            
+            # 백엔드 프로덕션 의존성 설치 및 오디트
+            npm install --production
+            npm audit fix
+            
+            # 프로세스 및 웹서버 재시작 (visudo 설정으로 password 프리패스)
+            pm2 restart backend-process
+            sudo systemctl restart nginx
+            
+            echo "Deployment completed perfectly!"
