@@ -40,7 +40,7 @@ jobs:
 
       - name: Connect and Execute Command using Dynamic IAM Credentials
         run: |
-          # 1. AWS API를 통해 임시 접속 정보 및 1회성 Private Key 가져오기 (소문자 ssh로 변경)
+          # 1. AWS API를 통해 임시 접속 정보 요청
           echo "임시 SSH 인증 정보 요청 중..."
           ACCESS_DETAILS=$(aws lightsail get-instance-access-details \
             --instance-name "${{ secrets.LIGHTSAIL_INSTANCE_NAME }}" \
@@ -48,17 +48,19 @@ jobs:
             --query "accessDetails" \
             --output json)
 
-          # 2. 응답 데이터에서 IP, 유저명, 임시 프라이빗 키 추출 및 저장
+          # 2. 응답 데이터에서 IP, 유저명 추출 및 임시 프라이빗 키 파일 안전하게 생성
           INSTANCE_IP=$(echo "$ACCESS_DETAILS" | jq -r '.ipAddress')
           USERNAME=$(echo "$ACCESS_DETAILS" | jq -r '.username')
+          
+          # 줄바꿈(\n)이 포함된 키 텍스트를 깨짐 없이 원래 포맷 그대로 저장합니다.
           echo "$ACCESS_DETAILS" | jq -r '.privateKeyText' > lightsail_tmp_key
 
           # 3. 임시 키 파일 권한 변경 (SSH 필수 보안 설정)
           chmod 400 lightsail_tmp_key
 
-          # 4. SSH 접속 후 원하는 명령어 실행
+          # 4. SSH 접속 후 명령어 실행 (Pseudo-terminal 경고 방지를 위해 -T 옵션 추가)
           echo "인스턴스($INSTANCE_IP)에 접속하여 명령어를 실행합니다."
-          ssh -i lightsail_tmp_key -o StrictHostKeyChecking=no "${USERNAME}@${INSTANCE_IP}" << 'EOF'
+          ssh -T -i lightsail_tmp_key -o StrictHostKeyChecking=no "${USERNAME}@${INSTANCE_IP}" << 'EOF'
             echo "Hello from GitHub Actions using IAM Role!"
             uname -a
           EOF
