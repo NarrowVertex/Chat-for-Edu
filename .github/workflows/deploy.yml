@@ -71,6 +71,6 @@ jobs:
 
       - name: 8. Execute Remote Commands via SSH
         run: |
-          ssh -i ./lightsail.pem -o StrictHostKeyChecking=no ubuntu@${{ env.INSTANCE_IP }} << 'EOF'
+          ssh -i ./lightsail.pem -T -q -o StrictHostKeyChecking=no ubuntu@${{ env.INSTANCE_IP }} << 'EOF'
             echo "IAM Role-based Deployment completed perfectly!" >> ./success.txt
           EOF
