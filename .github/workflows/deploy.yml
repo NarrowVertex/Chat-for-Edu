@@ -23,6 +23,7 @@ jobs:
         run: |
           cd frontend
           npm install
+          npm install -D terser
           npm run build
 
       # 2. 서버에서 Git Pull 진행 (백엔드 코드 및 기타 설정 갱신)
