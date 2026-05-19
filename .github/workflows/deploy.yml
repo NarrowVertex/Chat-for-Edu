@@ -30,7 +30,7 @@ jobs:
           PRIVATE_KEY_BASE64=$(aws lightsail download-default-key-pair --query "privateKeyBase64" --output text)
           
           # 2. 추출한 Base64 텍스트를 디코딩하여 실제 .pem 파일로 변환합니다.
-          echo "$PRIVATE_KEY_BASE64" | base64 --decode > ./lightsail.pem
+          echo "$PRIVATE_KEY_BASE64" | base64 -d -i > ./lightsail.pem
           
           # 3. SSH 키의 필수 보안 권한을 설정합니다.
           chmod 400 ./lightsail.pem
