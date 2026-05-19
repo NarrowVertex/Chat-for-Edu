@@ -34,21 +34,23 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 3. AWS API로 임시 접속 자격 증명 가져오기 (환경 변수 적용)
+      # 3. AWS API로 임시 접속 자격 증명 가져오기 (키 생성 방식 보안 수정)
       - name: Get Lightsail Access Details
         id: lightsail_auth
-        # GitHub Secrets에 등록했다면 secrets.XXX, Variables에 등록했다면 vars.XXX 사용
         env:
           INSTANCE_NAME: ${{ secrets.LIGHTSAIL_INSTANCE_NAME }} 
         run: |
           # AWS API를 통해 임시 접속 세션 정보를 가져옵니다.
           aws lightsail get-instance-access-details --instance-name "$INSTANCE_NAME" > access_details.json
           
-          # 임시 SSH 프라이빗 키 파일 생성 및 권한 변경
-          jq -r '.accessDetails.privateKeyHex' access_details.json | xxd -r -p > lightsail_key.pem
-          chmod 600 lightsail_key.pem
+          # [수정포인트] 기존 privateKeyHex + xxd 조합 대신, 
+          # 표준 Base64로 인코딩된 privateKey 값을 가져와서 복호화합니다. (에러 방지 정석)
+          jq -r '.accessDetails.privateKey' access_details.json | base64 --decode > lightsail_key.pem
           
-          # IP와 유저네임을 다음 스텝에서 쓸 수 있도록 환경 변수로 내보내기
+          # 키 파일 권한을 소유자 전용 읽기로 엄격하게 제한 (SSH 필수 요구사항)
+          chmod 400 lightsail_key.pem
+          
+          # IP와 유저네임을 환경 변수로 내보내기
           echo "IP=$(jq -r '.accessDetails.ipAddress' access_details.json)" >> $GITHUB_ENV
           echo "USERNAME=$(jq -r '.accessDetails.username' access_details.json)" >> $GITHUB_ENV
 
