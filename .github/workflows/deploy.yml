@@ -34,9 +34,9 @@ jobs:
           PURE_KEY=$(echo "$RAW_KEY" | sed 's/-----BEGIN RSA PRIVATE KEY----- //g' | fold -w 64)
           
           # 3. 깨끗해진 본문 위아래로 정석 규격 문구를 붙여서 .pem 파일을 완성합니다.
-          echo "-----BEGIN RSA PRIVATE KEY-----" > ./lightsail.pem
+          # echo "-----BEGIN RSA PRIVATE KEY-----" > ./lightsail.pem
           echo "$PURE_KEY" >> ./lightsail.pem
-          echo "-----END RSA PRIVATE KEY-----" >> ./lightsail.pem
+          # echo "-----END RSA PRIVATE KEY-----" >> ./lightsail.pem
 
           # 4. SSH 키 출력
           cat ./lightsail.pem
