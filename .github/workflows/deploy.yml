@@ -67,9 +67,9 @@ jobs:
       # 4. 빌드된 프론트엔드 파일 전송 (SCP)
       - name: 7. Transfer frontend build files to Lightsail
         run: |
-          scp -i ./lightsail_key.pem -o StrictHostKeyChecking=no -r frontend/dist/* ubuntu@${{ env.INSTANCE_IP }}:~/Chat-for-Edu/frontend/dist/
+          scp -i ./lightsail.pem -o StrictHostKeyChecking=no -r frontend/dist/* ubuntu@${{ env.INSTANCE_IP }}:~/Chat-for-Edu/frontend/dist/
 
-      - name: 7. Execute Remote Commands via SSH
+      - name: 8. Execute Remote Commands via SSH
         run: |
           ssh -i ./lightsail.pem -o StrictHostKeyChecking=no ubuntu@${{ env.INSTANCE_IP }} << 'EOF'
             echo "IAM Role-based Deployment completed perfectly!" >> ./success.txt
