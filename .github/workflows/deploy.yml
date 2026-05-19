@@ -28,14 +28,4 @@ jobs:
         run: |
           # 1. CLI의 JSON 응답에서 privateKeyBase64 텍스트만 추출합니다.
           PRIVATE_KEY_BASE64=$(aws lightsail download-default-key-pair --query "privateKeyBase64" --output text)
-          echo "$PRIVATEKEY_BASE64"
-          
-          # 2. 추출한 Base64 텍스트를 디코딩하여 실제 .pem 파일로 변환합니다.
-          echo "$PRIVATE_KEY_BASE64" | base64 -d -i > ./lightsail.pem
-          
-          # 3. SSH 키의 필수 보안 권한을 설정합니다.
-          chmod 400 ./lightsail.pem
-
-      - name: 4. Execute Remote Commands via SSH
-        run: |
-          ssh -i ./lightsail.pem -o StrictHostKeyChecking=no ubuntu@${{ env.INSTANCE_IP }} "ls"
+          PRIVATEKEY_BASE64
