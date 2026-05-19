@@ -58,10 +58,12 @@ jobs:
           echo "USERNAME=$(jq -r '.accessDetails.username' access_details.json)" >> $GITHUB_ENV
 
       # 4. 빌드된 프론트엔드 파일 전송 (SCP)
-      - name: Transfer frontend build files to Lightsail
+      - name: Deploy Build Files to Lightsail (using SCP)
         run: |
-          scp -i lightsail_key.pem -o StrictHostKeyChecking=no -r frontend/dist/* ${USERNAME}@${IP}:~/Chat-for-Edu/frontend/dist/
-
+          rsync -avz -e "ssh -i lightsail_key.pem -o StrictHostKeyChecking=no" \
+            frontend/dist/ \
+            $USERNAME@$IP:~/Chat-for-Edu/frontend/dist/
+            
       # 5. 서버 백엔드 후처리 및 서비스 재시작 (SSH)
       - name: Execute remote ssh commands to deploy
         run: |
