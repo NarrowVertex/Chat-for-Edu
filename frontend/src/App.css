@@ -3953,4 +3953,572 @@ body {
 
 .summary-paper-preview .markdown-body table tr:nth-child(even) td {
   background-color: #f8fafc;
-}
+}
+
+/* ==========================================
+   MOBILE RESPONSIVE STYLES
+   @media (max-width: 768px)
+   ========================================== */
+
+@media (max-width: 768px) {
+
+  /* ── Base ── */
+  body {
+    overflow: auto;
+  }
+
+  /* ── Hide desktop sidebar ── */
+  .sidebar {
+    display: none !important;
+  }
+
+  /* ── App container: stack vertically ── */
+  .app-container {
+    flex-direction: column;
+    height: 100dvh;
+  }
+
+  /* ── Main content: full width, account for bottom nav ── */
+  .main-content {
+    width: 100%;
+    height: calc(100dvh - 60px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Top bar ── */
+  .top-bar {
+    padding: 10px 14px;
+    min-height: 52px;
+    flex-shrink: 0;
+  }
+
+  .logo-text {
+    font-size: 17px !important;
+  }
+
+  .icon-button {
+    width: 36px;
+    height: 36px;
+  }
+
+  .avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+  }
+
+  /* ── Login screen ── */
+  .login-container {
+    padding: 20px;
+    align-items: flex-start;
+    padding-top: 80px;
+  }
+
+  .login-box {
+    padding: 28px 20px;
+    border-radius: 20px;
+  }
+
+  .login-title {
+    font-size: 24px;
+  }
+
+  .login-input {
+    font-size: 16px; /* prevent iOS zoom */
+    padding: 13px 14px;
+  }
+
+  /* ── Home / Lobby ── */
+  .center-lobby {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0;
+  }
+
+  .greeting {
+    font-size: 24px !important;
+    margin-bottom: 24px;
+  }
+
+  .user-greeting {
+    font-size: 22px !important;
+  }
+
+  .action-chips {
+    gap: 8px;
+    margin-top: 20px;
+  }
+
+  .chip {
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+
+  /* ── Input area ── */
+  .input-area-wrapper {
+    padding: 8px 12px 12px 12px;
+    flex-shrink: 0;
+  }
+
+  .input-area-wrapper.panel-open {
+    padding-right: 12px; /* remove desktop panel offset */
+  }
+
+  .input-container {
+    max-width: 100% !important;
+    border-radius: 18px;
+    padding: 10px 14px;
+  }
+
+  .input-field {
+    font-size: 16px; /* prevent iOS zoom */
+    min-height: 36px;
+  }
+
+  /* ── Project / Chat view ── */
+  .node-detail-container {
+    padding: 0 12px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    flex: 1;
+  }
+
+  .node-detail-header {
+    padding: 12px 0;
+  }
+
+  .header-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .node-info-group {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .node-header-title {
+    font-size: 15px;
+  }
+
+  .action-btns {
+    display: flex;
+    gap: 4px;
+  }
+
+  /* Understanding score: horizontal scroll */
+  .understanding-score-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    white-space: nowrap;
+  }
+
+  .gauge-block-container {
+    display: inline-flex;
+    gap: 6px;
+  }
+
+  .gauge-block {
+    width: 36px;
+    height: 14px;
+    min-width: 36px;
+  }
+
+  /* ── Node view (mindmap) ── */
+  .node-view-split {
+    flex-direction: column;
+    height: 100%;
+  }
+
+  .node-graph-area {
+    flex: 1;
+    height: 100%;
+    width: 100%;
+    position: relative;
+  }
+
+  /* Node right panel: overlay on mobile */
+  .node-right-panel {
+    position: fixed !important;
+    top: 52px !important;
+    right: 0 !important;
+    bottom: 60px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    z-index: 200;
+    border-radius: 0 !important;
+    border-left: none !important;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .panel-close-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Drawing toolbar: stick to bottom on mobile */
+  .drawing-toolbar-wrapper {
+    position: fixed !important;
+    bottom: 70px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    align-self: unset !important;
+    margin-left: 0 !important;
+    z-index: 100;
+  }
+
+  /* ── Quiz view ── */
+  .quiz-layout-v3 {
+    flex-direction: column !important;
+    gap: 16px;
+    padding: 12px;
+    overflow-y: auto;
+    height: 100%;
+  }
+
+  .quiz-setup-card-v3 {
+    width: 100% !important;
+    flex: none !important;
+  }
+
+  .quiz-history-panel-v3 {
+    width: 100% !important;
+    flex: none !important;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .quiz-setup-grid-v3 {
+    flex-direction: column !important;
+    gap: 16px;
+  }
+
+  .setup-col-v3 {
+    width: 100% !important;
+  }
+
+  .difficulty-vertical-v3 {
+    flex-direction: row !important;
+    gap: 8px;
+  }
+
+  .diff-btn-v3 {
+    flex: 1;
+  }
+
+  .quiz-taking-container-v3 {
+    padding: 12px;
+    overflow-y: auto;
+    height: 100%;
+  }
+
+  .question-card-v3 {
+    padding: 16px !important;
+  }
+
+  /* ── Summary view ── */
+  .summary-view-container {
+    padding: 0;
+    overflow-y: auto;
+    height: 100%;
+  }
+
+  .summary-header {
+    padding: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .summary-paper-preview {
+    margin: 0 12px 20px;
+    padding: 20px 16px;
+  }
+
+  /* ── Profile dropdown ── */
+  .profile-dropdown {
+    position: fixed;
+    top: auto;
+    bottom: 70px;
+    right: 12px;
+    z-index: 999;
+  }
+
+  /* ── Modals ── */
+  .modal-overlay {
+    padding: 20px 16px;
+  }
+
+  .modal-box {
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: 20px;
+  }
+
+  /* ── Project sidebar header (inside project view) ── */
+  .sidebar-project-view,
+  .view-mode-tabs {
+    display: none !important;
+  }
+
+  /* ── View mode tabs: show as horizontal scroll at top on mobile ── */
+  .main-content.view-project .mobile-view-tabs {
+    display: flex;
+  }
+
+  /* ── Mobile Bottom Navigation Bar ── */
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: rgba(15, 17, 21, 0.95);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    z-index: 500;
+    align-items: stretch;
+  }
+
+  .mobile-nav-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    background: transparent;
+    border: none;
+    color: #718096;
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.2s;
+    padding: 8px 4px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-nav-btn.active {
+    color: #4285f4;
+  }
+
+  .mobile-nav-btn svg {
+    transition: transform 0.2s;
+  }
+
+  .mobile-nav-btn.active svg {
+    transform: scale(1.1);
+  }
+
+  /* ── Mobile Drawer ── */
+  .mobile-drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 600;
+    animation: fadeIn 0.2s ease;
+  }
+
+  .mobile-drawer {
+    position: fixed;
+    top: 0;
+    bottom: 60px;
+    left: 0;
+    width: 80%;
+    max-width: 320px;
+    background: rgba(18, 20, 26, 0.98);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    z-index: 700;
+    display: flex;
+    flex-direction: column;
+    animation: slideInLeft 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow: hidden;
+  }
+
+  @keyframes slideInLeft {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(0); }
+  }
+
+  .mobile-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 16px 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  .mobile-drawer-list {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 8px 0 16px 0;
+  }
+
+  .mobile-drawer-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 12px 16px;
+    background: transparent;
+    border: none;
+    color: #b0b3b8;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-drawer-item span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+
+  .mobile-drawer-item:hover,
+  .mobile-drawer-item.active {
+    background: rgba(66, 133, 244, 0.1);
+    color: #fff;
+  }
+
+  /* ── Mobile Search Panel ── */
+  .mobile-search-panel {
+    position: fixed;
+    top: 52px;
+    left: 0;
+    right: 0;
+    bottom: 60px;
+    background: rgba(15, 17, 21, 0.97);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    z-index: 400;
+    overflow-y: auto;
+    animation: fadeIn 0.2s ease;
+  }
+
+  .mobile-search-inner {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .mobile-search-input {
+    width: 100%;
+    padding: 12px 12px 12px 38px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.3);
+    color: #fff;
+    font-size: 16px;
+    outline: none;
+    box-sizing: border-box;
+  }
+
+  .mobile-search-input:focus {
+    border-color: rgba(66, 133, 244, 0.5);
+  }
+
+  .mobile-search-results {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .mobile-search-result-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s;
+  }
+
+  .mobile-search-result-item:active {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  /* ── Hide desktop-only elements on mobile ── */
+  .tutorial-btn {
+    display: none;
+  }
+
+  .notification-wrapper {
+    display: none;
+  }
+
+  /* ── Bottom nav not shown on login ── */
+  .view-login .mobile-bottom-nav {
+    display: none;
+  }
+
+  /* ── Ensure center-lobby doesn't go under bottom nav ── */
+  .center-lobby {
+    padding-bottom: 8px;
+  }
+
+  /* ── Input area bottom spacing ── */
+  .input-area-wrapper {
+    padding-bottom: env(safe-area-inset-bottom, 12px);
+  }
+
+  /* ── Notification dropdown on mobile ── */
+  .notification-dropdown {
+    position: fixed;
+    top: auto;
+    bottom: 70px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    z-index: 999;
+  }
+
+  /* ── Drag drop overlay full screen ── */
+  .drag-drop-overlay {
+    z-index: 9999;
+  }
+
+  /* ── Text size adjustments ── */
+  .section-label {
+    font-size: 12px;
+  }
+
+  .text-box {
+    font-size: 14px;
+  }
+
+  .markdown-body {
+    font-size: 14px;
+  }
+}
+
+/* Desktop: hide mobile-only elements */
+@media (min-width: 769px) {
+  .mobile-bottom-nav,
+  .mobile-drawer,
+  .mobile-drawer-backdrop,
+  .mobile-search-panel {
+    display: none !important;
+  }
+}
+

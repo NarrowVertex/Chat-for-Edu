@@ -25,6 +25,16 @@ function App() {
   const [view, setView] = useState('login'); // 'login', 'home', 'project'
   const [viewMode, setViewMode] = useState('chat'); // 'chat' or 'node'
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [mobileTab, setMobileTab] = useState('home'); // 'home' | 'projects' | 'search'
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [mobileSearchQuery, setMobileSearchQuery] = useState('');
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const [historyItems, setHistoryItems] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
@@ -3338,6 +3348,106 @@ function App() {
         )}
 
         <TutorialOverlay isOpen={isTutorialOpen} onClose={() => setIsTutorialOpen(false)} />
+
+        {/* Mobile Bottom Tab Bar */}
+        {isMobile && view !== 'login' && (
+          <nav className="mobile-bottom-nav">
+            <button
+              className={`mobile-nav-btn ${mobileTab === 'home' ? 'active' : ''}`}
+              onClick={() => { setMobileTab('home'); setView('home'); setActiveChat(null); setIsDrawerOpen(false); }}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+              <span>홈</span>
+            </button>
+            <button
+              className={`mobile-nav-btn ${mobileTab === 'projects' ? 'active' : ''}`}
+              onClick={() => { setMobileTab('projects'); setIsDrawerOpen(true); }}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              <span>프로젝트</span>
+            </button>
+            <button
+              className={`mobile-nav-btn ${mobileTab === 'search' ? 'active' : ''}`}
+              onClick={() => { setMobileTab('search'); setIsDrawerOpen(false); }}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <span>검색</span>
+            </button>
+          </nav>
+        )}
+
+        {/* Mobile Project Drawer */}
+        {isMobile && isDrawerOpen && (
+          <>
+            <div className="mobile-drawer-backdrop" onClick={() => setIsDrawerOpen(false)} />
+            <div className="mobile-drawer">
+              <div className="mobile-drawer-header">
+                <span>프로젝트 목록</span>
+                <button onClick={() => setIsDrawerOpen(false)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: '8px' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              <button className="new-chat-button" style={{ margin: '12px 16px' }} onClick={() => { setView('home'); setActiveChat(null); setIsDrawerOpen(false); setMobileTab('home'); }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>새 채팅</span>
+              </button>
+              <div className="mobile-drawer-list">
+                {historyItems.map((item, i) => (
+                  <button
+                    key={item.id ?? i}
+                    className={`mobile-drawer-item ${activeChat?.id === item.id ? 'active' : ''}`}
+                    onClick={() => { enterProject(item); setIsDrawerOpen(false); setMobileTab('projects'); }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    <span>{item.title}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Mobile Search Panel */}
+        {isMobile && mobileTab === 'search' && view !== 'login' && (
+          <div className="mobile-search-panel">
+            <div className="mobile-search-inner">
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="text"
+                  className="mobile-search-input"
+                  placeholder="프로젝트 및 블록 검색..."
+                  value={lobbySearchQuery}
+                  onChange={(e) => setLobbySearchQuery(e.target.value)}
+                  autoFocus
+                />
+                <svg style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </div>
+              <div className="mobile-search-results">
+                {isLobbySearching ? (
+                  <div style={{ padding: '20px', textAlign: 'center', color: '#888' }}>검색 중...</div>
+                ) : lobbySearchResults.length === 0 && lobbySearchQuery ? (
+                  <div style={{ padding: '20px', textAlign: 'center', color: '#888' }}>결과가 없습니다</div>
+                ) : (
+                  lobbySearchResults.map((result) => (
+                    <div
+                      key={result.id}
+                      className="mobile-search-result-item"
+                      onClick={() => { handleGlobalSearchResultClick(result); setMobileTab('projects'); }}
+                    >
+                      <span>{result.type === 'chat' ? '📁' : '📄'}</span>
+                      <div>
+                        <div style={{ fontSize: '14px', fontWeight: '600', color: result.type === 'chat' ? '#4285f4' : '#fff' }}>
+                          {result.type === 'chat' ? result.title : `[${result.chatTitle}] ${result.title}`}
+                        </div>
+                        {result.snippet && <div style={{ fontSize: '12px', color: '#888', marginTop: '2px' }}>{result.snippet}</div>}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
