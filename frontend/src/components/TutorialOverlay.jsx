@@ -20,7 +20,7 @@ const TutorialOverlay = ({ isOpen, onClose }) => {
   const [nodeSubStep, setNodeSubStep] = useState(0);
   const [quizSubStep, setQuizSubStep] = useState(0);
   const tabs = ['welcome', 'search', 'chat', 'node', 'quiz', 'summary'];
-  const slides = ['welcome-0', 'welcome-1', 'search-0', 'search-1', 'chat-0', 'chat-1', 'chat-2', 'chat-3', 'chat-4', 'node-0', 'node-1', 'node-2', 'quiz-0', 'quiz-1', 'summary'];
+  const slides = ['welcome-0', 'welcome-1', 'search-0', 'search-1', 'chat-0', 'chat-1', 'chat-2', 'chat-3', 'chat-4', 'node-0', 'node-1', 'node-2', 'node-3', 'node-4', 'quiz-0', 'quiz-1', 'summary'];
 
   const getSlideKey = () => {
     if (activeTab === 'welcome') return `welcome-${welcomeSubStep}`;
@@ -58,6 +58,10 @@ const TutorialOverlay = ({ isOpen, onClose }) => {
     } else if (activeTab === 'node' && nodeSubStep === 1) {
       setNodeSubStep(2);
     } else if (activeTab === 'node' && nodeSubStep === 2) {
+      setNodeSubStep(3);
+    } else if (activeTab === 'node' && nodeSubStep === 3) {
+      setNodeSubStep(4);
+    } else if (activeTab === 'node' && nodeSubStep === 4) {
       setActiveTab('quiz');
       setQuizSubStep(0);
     } else if (activeTab === 'quiz' && quizSubStep === 0) {
@@ -75,7 +79,11 @@ const TutorialOverlay = ({ isOpen, onClose }) => {
   };
 
   const handlePrev = () => {
-    if (activeTab === 'node' && nodeSubStep === 2) {
+    if (activeTab === 'node' && nodeSubStep === 4) {
+      setNodeSubStep(3);
+    } else if (activeTab === 'node' && nodeSubStep === 3) {
+      setNodeSubStep(2);
+    } else if (activeTab === 'node' && nodeSubStep === 2) {
       setNodeSubStep(1);
     } else if (activeTab === 'node' && nodeSubStep === 1) {
       setNodeSubStep(0);
@@ -86,7 +94,7 @@ const TutorialOverlay = ({ isOpen, onClose }) => {
       setQuizSubStep(0);
     } else if (activeTab === 'quiz' && quizSubStep === 0) {
       setActiveTab('node');
-      setNodeSubStep(2);
+      setNodeSubStep(4);
     } else if (activeTab === 'chat' && chatSubStep === 4) {
       setChatSubStep(3);
     } else if (activeTab === 'chat' && chatSubStep === 3) {
@@ -117,7 +125,7 @@ const TutorialOverlay = ({ isOpen, onClose }) => {
         } else if (prevTab === 'chat') {
           setChatSubStep(4);
         } else if (prevTab === 'node') {
-          setNodeSubStep(2);
+          setNodeSubStep(4);
         } else if (prevTab === 'quiz') {
           setQuizSubStep(1);
         }
@@ -1147,7 +1155,7 @@ const TutorialOverlay = ({ isOpen, onClose }) => {
               </div>
             </div>
           );
-        } else {
+        } else if (nodeSubStep === 2) {
           return (
             <div style={{
               display: 'flex',
@@ -1326,6 +1334,24 @@ const TutorialOverlay = ({ isOpen, onClose }) => {
                   />
                 </svg>
               </div>
+            </div>
+          );
+        } else if (nodeSubStep === 3) {
+          return (
+            <div style={{
+              width: '100%', height: '100%', minHeight: '260px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px'
+            }}>
+              <img src="/node-example-1.png" alt="Node Example 1" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '12px' }} />
+            </div>
+          );
+        } else {
+          return (
+            <div style={{
+              width: '100%', height: '100%', minHeight: '260px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px'
+            }}>
+              <img src="/node-example-2.png" alt="Node Example 2" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '12px' }} />
             </div>
           );
         }
@@ -1784,10 +1810,20 @@ const TutorialOverlay = ({ isOpen, onClose }) => {
             title: '🔗 노드 간 연결 끊기 (관계 해제)',
             desc: '마인드맵에서 부모 노드와 연결되어 있는 자식 노드에 마우스 커서를 올리면(Hover), 해당 노드의 왼쪽 경계선에 🔴 빨간색 [X] 모양의 선 끊기 버튼이 나타납니다.\n\n• 🗑️ 관계 해제: [X] 버튼을 클릭하면 부모 개념과의 관계선이 즉시 해제됩니다.\n• 🌿 하위 연결 유지: 연결을 끊더라도, 해당 노드의 오른쪽이나 아래쪽으로 연결된 하위 노드들은 그대로 유지됩니다.\n• 🟦 B 블록 전환: 부모와의 관계가 끊어지며 최상위 독립 노드가 된 개념은 자동으로 B 블록(독립 루트 노드) 형태로 전환됩니다.'
           };
-        } else {
+        } else if (nodeSubStep === 2) {
           return {
             title: '🖍️ 마인드맵 필기 도구 (드로잉 툴바)',
             desc: '채팅창 좌측 상단에는 마인드맵 위에 직접 필기할 수 있는 드로잉 툴바가 제공됩니다.\n\n• ✏️ 펜: 마인드맵 캔버스 위에 자유롭게 선을 그리거나 중요한 내용을 필기할 수 있습니다. 아이콘을 클릭하여 색상 프리셋을 선택할 수 있습니다.\n• 🖍️ 형광펜: 반투명하고 굵은 마킹선으로 핵심 지식이나 키워드를 강조할 때 유용하게 쓰입니다. 동일하게 클릭 시 색상 변경이 가능합니다.\n• 🧹 지우개: 작성한 필기 선을 마우스로 문지르거나 클릭하여 개별적으로 깔끔하게 지울 수 있습니다.\n• ❌ 전체 삭제 (X 아이콘): 클릭하면 마인드맵 상에 그린 모든 필기(드로잉 선)를 한 번에 지우고 캔버스를 깨끗하게 비웁니다.'
+          };
+        } else if (nodeSubStep === 3) {
+          return {
+            title: '🗺️ 노드의 활용 예시 (1)',
+            desc: '노드 모드를 활용하여 마인드맵처럼 자유롭게 블록들을 구성해 보세요.'
+          };
+        } else {
+          return {
+            title: '🗺️ 노드의 활용 예시 (2)',
+            desc: '노드 모드를 활용하여 마인드맵처럼 자유롭게 블록들을 구성해 보세요.'
           };
         }
       case 'quiz':

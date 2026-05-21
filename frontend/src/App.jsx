@@ -1010,6 +1010,7 @@ function App() {
       localStorage.setItem('currentUser', JSON.stringify(newUser)); // 세션 저장
       setCurrentUser(newUser);
       setView('home');
+      setIsTutorialOpen(true); // 회원가입 시 튜토리얼 자동 오픈
     } catch (err) {
       setAuthError('백엔드 서버에 연결할 수 없습니다.');
     }
