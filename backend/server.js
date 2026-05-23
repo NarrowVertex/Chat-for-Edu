@@ -21,14 +21,14 @@ function getMimeType(filePath) {
   }
 }
 
-// 트리 구조에서 상위 노드들을 추적하여 대화 히스토리를 구성하는 함수
-async function getChatHistory(parentId) {
+// 트리 구조에서 실제 질문 발자취를 추적하여 대화 히스토리를 구성하는 함수 (reference_node_id 기반)
+async function getChatHistory(referenceNodeId) {
   let history = [];
-  let currentId = parentId;
+  let currentId = referenceNodeId;
 
   while (currentId) {
     const [rows] = await db.execute(
-      'SELECT parent_id, question_text, answer_text FROM Messages WHERE id = ?',
+      'SELECT reference_node_id, question_text, answer_text FROM Messages WHERE id = ?',
       [currentId]
     );
 
@@ -51,7 +51,7 @@ async function getChatHistory(parentId) {
       });
     }
 
-    currentId = msg.parent_id;
+    currentId = msg.reference_node_id;
   }
 
   // 루트부터 현재까지 올바른 시간 순서로 정렬
@@ -670,8 +670,8 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
       : "새 블록";
 
     if (!aiAnswer && node_type !== 'content') {
-      // 1. 이전 대화 내역(히스토리) 가져오기
-      const history = await getChatHistory(parent_id);
+      // 1. 이전 대화 내역(히스토리) 가져오기 (reference_node_id 기반)
+      const history = await getChatHistory(reference_node_id);
 
       const prompt = `당신은 에듀테크 학습 도우미입니다. 
 사용자의 질문: '${text_content}'
@@ -679,7 +679,7 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
 
 위 질문에 대해 다음 두 가지를 생성해주세요:
 1. 해당 단계의 학습 내용을 대표하는 10자 이내의 짧은 요약 제목
-2. 학습 도우미로서 사용자가 이해하기 쉽도록 체계적으로 구조화된 상세한 심화 학습 내용이나 해결책 (각 핵심 내용이나 단계 사이에는 반드시 줄바꿈(엔터)을 2번 연속으로 사용하여 시각적으로 아주 명확히 구분되게 하세요. 절대로 '<두 줄 빈 줄>' 같은 글자를 직접 타이핑하지 마세요. 이전 대화 내용을 참고하여 문맥에 맞는 답변을 하세요. 한 문장 안에서는 절대 줄바꿈을 하지 말고, 문장이 길더라도 끊기지 않고 하나의 줄로 이어서 출력되게 하세요. 줄바꿈은 문단이 바뀌거나 핵심 내용이 넘어갈 때만 사용하세요. 수학 공식은 반드시 별도의 줄($$...$$)에 배치하여 독립된 칸처럼 보이게 하세요.)
+2. 학습 도우미로서 사용자가 이해하기 쉽도록 체계적으로 구조화된 상세한 심화 학습 내용이나 해결책 (각 핵심 내용이나 단계 사이에는 반드시 줄바꿈(엔터)을 2번 연속으로 사용하여 시각적으로 아주 명확히 구분되게 하세요. 절대로 '<두 줄 빈 줄>' 같은 글자를 직접 타이핑하지 마세요. 이전 대화(사용자의 질문과 AI의 답변)의 흐름과 맥락을 완벽하게 이해하고, 이어서 들어오는 질문에 대해 모순이 없도록 아주 자연스럽게 연결하여 답변하세요. 한 문장 안에서는 절대 줄바꿈을 하지 말고, 문장이 길더라도 끊기지 않고 하나의 줄로 이어서 출력되게 하세요. 줄바꿈은 문단이 바뀌거나 핵심 내용이 넘어갈 때만 사용하세요. 수학 공식은 반드시 별도의 줄($$...$$)에 배치하여 독립된 칸처럼 보이게 하세요.)
 
 응답 형식은 반드시 다음과 같이 작성하세요:
 [TITLE] 제목 내용
@@ -752,8 +752,8 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
     const node_label = msg.node_label;
     const parent_id = msg.parent_id;
 
-    // 2. 이전 대화 내역(히스토리) 가져오기
-    const history = await getChatHistory(parent_id);
+    // 2. 이전 대화 내역(히스토리) 가져오기 (reference_node_id 기반)
+    const history = await getChatHistory(msg.reference_node_id);
 
     // 3. Gemini를 통해 답변 재생성
     const prompt = `당신은 에듀테크 학습 도우미입니다. 
@@ -762,7 +762,7 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
 
 위 질문에 대해 다음 두 가지를 생성해주세요:
 1. 해당 단계의 학습 내용을 대표하는 10자 이내의 짧은 요약 제목
-2. 학습 도우미로서 사용자가 이해하기 쉽도록 체계적으로 구조화된 상세한 심화 학습 내용이나 해결책 (각 핵심 내용이나 단계 사이에는 반드시 줄바꿈(엔터)을 2번 연속으로 사용하여 시각적으로 아주 명확히 구분되게 하세요. 절대로 '<두 줄 빈 줄>' 같은 글자를 직접 타이핑하지 마세요. 수학 공식은 반드시 별도의 줄($$...$$)에 배치하여 독립된 칸처럼 보이게 하세요. 이전 대화 문맥을 고려하세요. 한 문장 안에서는 절대 줄바꿈을 하지 말고, 문장이 길더라도 끊기지 않고 하나의 줄로 이어서 출력되게 하세요. 줄바꿈은 문단이 바뀌거나 핵심 내용이 넘어갈 때만 사용하세요.)
+2. 학습 도우미로서 사용자가 이해하기 쉽도록 체계적으로 구조화된 상세한 심화 학습 내용이나 해결책 (각 핵심 내용이나 단계 사이에는 반드시 줄바꿈(엔터)을 2번 연속으로 사용하여 시각적으로 아주 명확히 구분되게 하세요. 절대로 '<두 줄 빈 줄>' 같은 글자를 직접 타이핑하지 마세요. 이전 대화(사용자의 질문과 AI의 답변)의 흐름과 맥락을 완벽하게 이해하고, 이어서 들어오는 질문에 대해 모순이 없도록 아주 자연스럽게 연결하여 답변하세요. 수학 공식은 반드시 별도의 줄($$...$$)에 배치하여 독립된 칸처럼 보이게 하세요. 한 문장 안에서는 절대 줄바꿈을 하지 말고, 문장이 길더라도 끊기지 않고 하나의 줄로 이어서 출력되게 하세요. 줄바꿈은 문단이 바뀌거나 핵심 내용이 넘어갈 때만 사용하세요.)
 
 응답 형식은 반드시 다음과 같이 작성하세요:
 [TITLE] 제목 내용
