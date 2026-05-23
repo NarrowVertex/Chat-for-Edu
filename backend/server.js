@@ -877,23 +877,64 @@ app.post('/api/quiz/generate', async (req, res) => {
         ? "주관식(short)과 서술형(descriptive) 문제는 반드시 제공된 수식이나 원리를 활용하여 직접 계산하거나 수치를 도출해야 하는 문제로 구성하세요."
         : "개념 설명 위주의 문제를 구성하세요.";
 
-      const prompt = `당신은 에듀테크 전문 출제 위원입니다. 아래 제공된 [학습 내용]을 바탕으로 학생을 위한 맞춤형 퀴즈를 생성하세요.
+      // 3. 채팅방 소유자의 선호 모델 조회 후 표준 AI 서비스 연동
+      let finalModelId = availableModels[0]?.id;
+      if (chatId) {
+        const [[chatInfo]] = await db.execute('SELECT owner_id FROM Chats WHERE id = ?', [chatId]);
+        if (chatInfo) {
+          const [userRows] = await db.execute('SELECT preferred_model FROM Users WHERE id = ?', [chatInfo.owner_id]);
+          if (userRows[0]?.preferred_model) {
+            finalModelId = userRows[0].preferred_model;
+          }
+        }
+      }
+
+      let remainingTypes = {
+        ox: parseInt(types.ox, 10) || 0,
+        multiple: parseInt(types.multiple, 10) || 0,
+        short: parseInt(types.short, 10) || 0,
+        descriptive: parseInt(types.descriptive, 10) || 0
+      };
+
+      let allQuizData = [];
+      let batchCount = 0;
+      const MAX_BATCHES = 12; // 무한 루프 방지 (최대 12번 호출)
+
+      // Loop over batches to prevent LLM truncation and ensure total count
+      while (batchCount < MAX_BATCHES) {
+        // 1. 현재 요청할 배치 구성 (최대 5개)
+        let batchToRequest = { ox: 0, multiple: 0, short: 0, descriptive: 0 };
+        let space = 5;
+        for (const type of ['ox', 'multiple', 'short', 'descriptive']) {
+          const take = Math.min(remainingTypes[type], space);
+          batchToRequest[type] = take;
+          space -= take;
+        }
+
+        const totalInBatch = batchToRequest.ox + batchToRequest.multiple + batchToRequest.short + batchToRequest.descriptive;
+        if (totalInBatch === 0) break; // 모두 생성 완료
+
+        batchCount++;
+        console.log(`Generating batch ${batchCount} (${totalInBatch} questions requested)...`);
+
+        const prompt = `당신은 에듀테크 전문 출제 위원입니다. 아래 제공된 [학습 내용]을 바탕으로 학생을 위한 맞춤형 퀴즈를 생성하세요.
 
 [학습 내용]
 ${contextText}
 
 [출제 요구사항]
-1. 문제 유형 및 개수:
-   - OX 문제: ${types.ox}개
-   - 객관식: ${types.multiple}개
-   - 주관식: ${types.short}개
-   - 서술형: ${types.descriptive}개
+1. 문제 유형 및 개수 (총 ${totalInBatch}개):
+   - OX 문제: ${batchToRequest.ox}개
+   - 객관식: ${batchToRequest.multiple}개
+   - 주관식: ${batchToRequest.short}개
+   - 서술형: ${batchToRequest.descriptive}개
 2. 난이도 전략 [${difficulty}]: ${difficultyInstruction}
 3. 계산 문제 포함 여부: ${calculationInstruction}
 4. 모든 문제는 제공된 [학습 내용]의 범위를 벗어나지 않으면서도 난이도 전략에 충실해야 합니다.
 5. 응답은 반드시 아래의 JSON 배열 형식으로만 작성하세요. 텍스트 설명은 포함하지 마세요.
-6. [중요] 모든 문자열 값 내에서 백슬래시(\)를 사용할 때는 반드시 이중 백슬래시(\\)로 작성하여 JSON 파싱 에러가 나지 않게 하세요. (예: \theta -> \\theta, \mathbf -> \\mathbf)
+6. [중요] 모든 수식 기호 내에서 백슬래시(\)를 사용할 때는 반드시 이중 백슬래시(\\)로 작성하여 JSON 파싱 에러가 나지 않게 하세요. (예: \\theta, \\mathbf) 단, 줄바꿈 문자(\\n)는 예외로 이중 백슬래시를 사용하지 마세요.
 7. 수학 기호나 수식은 가급적 텍스트로 표현하되, 꼭 필요하다면 반드시 이중 백슬래시를 사용하세요.
+8. [가장 중요] 지정된 문제 개수를 정확히 맞추어 끝까지 생성하세요. 출력 길이 제한에 걸리지 않도록 군더더기 설명을 제외하고 간결하게 작성하세요.
 
 [응답 형식 예시]
 [
@@ -926,62 +967,83 @@ ${contextText}
 
 한글로 작성하세요.`;
 
-      // 3. 채팅방 소유자의 선호 모델 조회 후 표준 AI 서비스 연동
-      let finalModelId = availableModels[0]?.id;
-      if (chatId) {
-        const [[chatInfo]] = await db.execute('SELECT owner_id FROM Chats WHERE id = ?', [chatId]);
-        if (chatInfo) {
-          const [userRows] = await db.execute('SELECT preferred_model FROM Users WHERE id = ?', [chatInfo.owner_id]);
-          if (userRows[0]?.preferred_model) {
-            finalModelId = userRows[0].preferred_model;
+        try {
+          const fullText = await aiService.generateResponse(finalModelId, { prompt });
+
+          let cleaned = fullText.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+          const jsonStartIndex = cleaned.indexOf('[');
+          
+          if (jsonStartIndex !== -1) {
+            let jsonString = cleaned.substring(jsonStartIndex);
+            let quizData = [];
+            let wasRepaired = false;
+            
+            try {
+              quizData = JSON.parse(jsonString);
+            } catch (e) {
+              console.error(`Batch ${batchCount} Parse Failed, using jsonrepair...`);
+              wasRepaired = true;
+              const { jsonrepair } = await import('jsonrepair');
+              let secondaryCleaned = jsonString.replace(/\\(?!["\\/bfnrt])/g, '\\\\');
+              const repaired = jsonrepair(secondaryCleaned);
+              quizData = JSON.parse(repaired);
+            }
+
+            if (Array.isArray(quizData)) {
+              // 응답이 잘려서 자동 복구된 경우, 복구된 JSON의 마지막 문제는 문장이 짤려있는 불완전한 상태일 확률이 높으므로 폐기합니다.
+              if (wasRepaired && quizData.length > 0) {
+                console.log(`응답 잘림 감지됨. 마지막 1문제 폐기 처리`);
+                quizData.pop();
+              }
+
+              // 성공적으로 온전하게 생성된 문제들만 수집하고 남은 할당량에서 차감합니다.
+              for (const q of quizData) {
+                allQuizData.push(q);
+                if (q.type && remainingTypes[q.type] > 0) {
+                  remainingTypes[q.type]--;
+                } else {
+                  // AI가 다른 타입을 주었거나 type 매칭이 애매한 경우 남은 것 중 아무거나 차감
+                  for (const t of ['ox', 'multiple', 'short', 'descriptive']) {
+                    if (remainingTypes[t] > 0) {
+                      remainingTypes[t]--;
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+          } else {
+            console.error(`Batch ${batchCount} JSON 배열 찾기 실패`);
           }
+        } catch (batchError) {
+          console.error(`Batch ${batchCount} 생성 중 오류:`, batchError);
         }
       }
 
-      const fullText = await aiService.generateResponse(finalModelId, { prompt });
-
-      console.log("--- AI Raw Response ---");
-      console.log(fullText);
-      console.log("--- End Raw Response ---");
-
-      // JSON 추출 및 정제
-      let cleaned = fullText.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
-      const jsonStartIndex = cleaned.indexOf('[');
-      const jsonEndIndex = cleaned.lastIndexOf(']') + 1;
-      if (jsonStartIndex === -1 || jsonEndIndex === 0) throw new Error('JSON 배열을 찾을 수 없습니다.');
-      let jsonString = cleaned.substring(jsonStartIndex, jsonEndIndex);
-
-      console.log("--- Cleaned JSON String ---");
-      console.log(jsonString);
-      console.log("--- End JSON String ---");
-
-      // [수정] 불안정한 수동 정규식 정제를 제거하고 바로 파싱 시도
-      // AI가 3.0 모델이므로 프롬프트 지시만으로도 충분히 깨끗한 JSON을 생성합니다.
-      let quizData;
-      try {
-        quizData = JSON.parse(jsonString);
-      } catch (e) {
-        console.error("Primary JSON Parse Failed, attempting fallback cleaning...");
-        // 파싱 실패 시에만 최소한의 안전 장치 가동 (줄바꿈 및 제어 문자 보정)
-        const secondaryCleaned = jsonString
-          .replace(/\n/g, "\\n")
-          .replace(/\r/g, "\\r")
-          .replace(/\t/g, "\\t");
-        quizData = JSON.parse(secondaryCleaned);
+      if (allQuizData.length === 0) {
+        throw new Error("모든 퀴즈 배치 생성에 실패했습니다.");
       }
 
       // 개별 문제들 저장
-      for (const q of quizData) {
+      for (const q of allQuizData) {
         await db.execute(
           'INSERT INTO Questions (quiz_id, question_text, question_type, options, correct_answer, explanation, difficulty) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [quizId, q.question, q.type, q.options ? JSON.stringify(q.options) : null, q.answer, q.explanation, difficulty]
+          [
+            quizId, 
+            q.question || null, 
+            q.type || null, 
+            q.options ? JSON.stringify(q.options) : null, 
+            q.answer || null, 
+            q.explanation || null, 
+            difficulty
+          ]
         );
       }
 
       // 상태 완료로 변경
       await db.execute('UPDATE Quizzes SET status = ? WHERE id = ?', ['completed', quizId]);
 
-      res.json({ quizId, quizData });
+      res.json({ quizId, quizData: allQuizData });
 
     } catch (innerErr) {
       console.error("Quiz Logic Error:", innerErr);
@@ -1051,9 +1113,11 @@ app.post('/api/quiz/grade', async (req, res) => {
       "feedback": "피드백내용"
     }`;
 
-    const result_ai = await model.generateContent(prompt);
-    let fullText = (await result_ai.response).text().replace(/```json|```/g, '').trim();
-    res.json(JSON.parse(fullText));
+    // 채점은 기본 모델을 사용하거나, 필요시 chatId 기반 선호 모델을 조회하도록 확장 가능
+    const finalModelId = availableModels[0]?.id;
+    const fullText = await aiService.generateResponse(finalModelId, { prompt });
+    let cleanedText = fullText.replace(/```json|```/g, '').trim();
+    res.json(JSON.parse(cleanedText));
   } catch (err) {
     console.error("Grade Quiz Error:", err);
     res.status(500).json({ error: "채점 중 오류가 발생했습니다." });

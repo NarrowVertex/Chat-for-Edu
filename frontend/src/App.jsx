@@ -10,14 +10,26 @@ import './App.css';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import 'katex/dist/katex.min.css';
 import NodeTreeView from './NodeTreeView';
+
+const sanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    // Add any global overrides if needed, but defaultSchema is usually sufficient
+    // defaultSchema allows className, id, dir, etc.
+  }
+};
 import TutorialOverlay from './components/TutorialOverlay';
 
 // AI 답변에서 가끔 섞여 들어오는 <br> 류 HTML 태그를 마크다운 줄바꿈으로 치환
 const sanitizeMarkdown = (text) => {
   if (text == null) return '';
-  return String(text).replace(/<br\s*\/?>(\s*<br\s*\/?>)*\s*/gi, '\n\n');
+  return String(text)
+    .replace(/\\n/g, '\n')
+    .replace(/<br\s*\/?>(\s*<br\s*\/?>)*\s*/gi, '\n\n');
 };
 
 function App() {
@@ -2258,7 +2270,7 @@ function App() {
                           <span className="panel-message-label">AI 답변</span>
                           <div className="panel-bubble">
                             <div className="markdown-body">
-                              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeSanitize, sanitizeSchema], rehypeKatex]}>
                                 {sanitizeMarkdown(selectedNode.answer_text)}
                               </ReactMarkdown>
                             </div>
@@ -2529,7 +2541,7 @@ function App() {
                       <div className="q-type-badge-v3">{activeQuiz.data[currentQuizIndex].type.toUpperCase()}</div>
                       <div className="q-text-v3">
                         <div className="markdown-body">
-                          <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                          <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeSanitize, sanitizeSchema], rehypeKatex]}>
                             {sanitizeMarkdown(activeQuiz.data[currentQuizIndex].question)}
                           </ReactMarkdown>
                         </div>
@@ -2558,7 +2570,7 @@ function App() {
                                 <span className="opt-num-v3">{i + 1}</span>
                                 <span className="opt-text-v3">
                                   <span className="markdown-body inline">
-                                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeSanitize, sanitizeSchema], rehypeKatex]}>
                                       {sanitizeMarkdown(opt)}
                                     </ReactMarkdown>
                                   </span>
@@ -2651,7 +2663,7 @@ function App() {
                             </div>
                             <div className="res-q-text-v3">
                               <div className="markdown-body">
-                                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeSanitize, sanitizeSchema], rehypeKatex]}>
                                   {sanitizeMarkdown(q.question)}
                                 </ReactMarkdown>
                               </div>
@@ -2666,7 +2678,7 @@ function App() {
                                   <label>정답:</label>
                                   <div className="ans-val-v3">
                                     <div className="markdown-body">
-                                      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeSanitize, sanitizeSchema], rehypeKatex]}>
                                         {sanitizeMarkdown(q.answer)}
                                       </ReactMarkdown>
                                     </div>
@@ -2679,7 +2691,7 @@ function App() {
                               <div className="res-explanation-v3" style={{ marginBottom: '16px' }}>
                                 <label style={{ color: '#4285f4' }}>AI 피드백:</label>
                                 <div className="markdown-body">
-                                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeSanitize, sanitizeSchema], rehypeKatex]}>
                                     {sanitizeMarkdown(quizFeedback[i].feedback)}
                                   </ReactMarkdown>
                                 </div>
@@ -2689,7 +2701,7 @@ function App() {
                             <div className="res-explanation-v3">
                               <label>해설 / 모범 답안:</label>
                               <div className="markdown-body">
-                                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeSanitize, sanitizeSchema], rehypeKatex]}>
                                   {sanitizeMarkdown(q.explanation || q.answer)}
                                 </ReactMarkdown>
                               </div>
@@ -2760,7 +2772,7 @@ function App() {
                                 />
                               )}
                               <div className="markdown-body">
-                                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeSanitize, sanitizeSchema], rehypeKatex]}>
                                   {sanitizeMarkdown(n.answer_text)}
                                 </ReactMarkdown>
                               </div>
@@ -2790,7 +2802,7 @@ function App() {
                                   />
                                 )}
                                 <div className="markdown-body">
-                                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeSanitize, sanitizeSchema], rehypeKatex]}>
                                     {sanitizeMarkdown(n.answer_text)}
                                   </ReactMarkdown>
                                 </div>
@@ -2954,7 +2966,7 @@ function App() {
                               <div className="markdown-body">
                                 <ReactMarkdown
                                   remarkPlugins={[remarkMath]}
-                                  rehypePlugins={[rehypeKatex]}
+                                  rehypePlugins={[[rehypeSanitize, sanitizeSchema], rehypeKatex]}
                                 >
                                   {sanitizeMarkdown(selectedNode.answer_text)}
                                 </ReactMarkdown>

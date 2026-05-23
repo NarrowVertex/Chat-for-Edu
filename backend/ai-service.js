@@ -20,7 +20,8 @@ class GoogleProvider {
     this.model = this.genAI.getGenerativeModel({
       model: config.endpoint,
       generationConfig: {
-        temperature: config.temperature || 0.7
+        temperature: config.temperature || 0.7,
+        maxOutputTokens: 8192
       }
     });
   }
@@ -108,6 +109,7 @@ class OpenAIProvider {
       model: this.config.endpoint,
       messages: messages,
       temperature: this.config.temperature || 0.7,
+      max_tokens: 8192,
     });
 
     return response.choices[0].message.content;
@@ -134,7 +136,8 @@ class CustomHttpProvider {
         ...history.map(msg => ({ role: msg.role, content: msg.content })),
         { role: 'user', content: prompt }
       ],
-      temperature: this.config.temperature || 0.7
+      temperature: this.config.temperature || 0.7,
+      max_tokens: 8192
     };
 
     const headers = {
