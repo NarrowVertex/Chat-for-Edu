@@ -29,7 +29,8 @@ const sanitizeMarkdown = (text) => {
   if (text == null) return '';
   return String(text)
     .replace(/\\n/g, '\n')
-    .replace(/<br\s*\/?>(\s*<br\s*\/?>)*\s*/gi, '\n\n');
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/\n{3,}/g, '\n\n');
 };
 
 function App() {
