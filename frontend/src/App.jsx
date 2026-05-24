@@ -32,6 +32,13 @@ const sanitizeMarkdown = (text) => {
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/\n{3,}/g, '\n\n');
 };
+const getImageUrl = (url) => {
+  if (!url) return '';
+  if (window.location.hostname === 'localhost') {
+    return url;
+  }
+  return `${window.location.protocol}//${window.location.hostname}:5000${url}`;
+};
 
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -2767,7 +2774,7 @@ function App() {
                             <div className="block-content">
                               {n.photo_url && (
                                 <img
-                                  src={`${n.photo_url}`}
+                                  src={getImageUrl(n.photo_url)}
                                   alt="Node context"
                                   className="summary-image"
                                 />
@@ -2797,7 +2804,7 @@ function App() {
                               <div className="block-content">
                                 {n.photo_url && (
                                   <img
-                                    src={`${n.photo_url}`}
+                                    src={getImageUrl(n.photo_url)}
                                     alt="Node context"
                                     className="summary-image"
                                   />
@@ -2887,9 +2894,9 @@ function App() {
                       {selectedNode.photo_url && (
                         <div className="node-image-display">
                           <img
-                            src={`${selectedNode.photo_url}`}
+                            src={getImageUrl(selectedNode.photo_url)}
                             alt="Q"
-                            onClick={() => setEnlargedImage(`${selectedNode.photo_url}`)}
+                            onClick={() => setEnlargedImage(getImageUrl(selectedNode.photo_url))}
                             style={{ cursor: 'zoom-in' }}
                           />
                         </div>
