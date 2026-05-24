@@ -34,14 +34,12 @@ const sanitizeMarkdown = (text) => {
 };
 const getImageUrl = (url) => {
   if (!url) return '';
-  // 만약 /api/로 시작하는 주소라면 로컬/배포 환경 무관하게 그대로 사용하여 Nginx 포워딩을 활용합니다.
-  if (url.startsWith('/api/')) {
-    return url;
+  // DB에 저장된 기존 '/uploads/...' 경로를 '/api/uploads/...'로 자동 우회시킵니다.
+  // 이렇게 하면 AWS의 Nginx가 포트 5000 우회 설정 없이도 이미지를 자동으로 중계해 줍니다.
+  if (url.startsWith('/uploads/')) {
+    return `/api${url}`;
   }
-  if (window.location.hostname === 'localhost') {
-    return url;
-  }
-  return `${window.location.protocol}//${window.location.hostname}:5000${url}`;
+  return url;
 };
 
 function App() {
