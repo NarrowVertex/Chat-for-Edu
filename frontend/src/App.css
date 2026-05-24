@@ -3729,7 +3729,6 @@ body {
 .markdown-body p {
   margin-top: 0;
   margin-bottom: 1em;
-  white-space: pre-wrap; /* Crucial for single line breaks */
   line-height: 1.75;
 }
 
