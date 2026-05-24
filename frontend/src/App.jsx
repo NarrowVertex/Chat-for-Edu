@@ -34,6 +34,10 @@ const sanitizeMarkdown = (text) => {
 };
 const getImageUrl = (url) => {
   if (!url) return '';
+  // 만약 /api/로 시작하는 주소라면 로컬/배포 환경 무관하게 그대로 사용하여 Nginx 포워딩을 활용합니다.
+  if (url.startsWith('/api/')) {
+    return url;
+  }
   if (window.location.hostname === 'localhost') {
     return url;
   }

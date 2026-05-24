@@ -67,7 +67,14 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // static folder for uploads
+app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// uploads 폴더가 없으면 자동 생성
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
 
 // multer configuration
 const storage = multer.diskStorage({
@@ -431,7 +438,7 @@ app.patch('/api/chats/:id/drawings', async (req, res) => {
 app.post('/api/chats', upload.single('photo'), async (req, res) => {
   try {
     const { owner_id, text_content, model_id } = req.body;
-    const photo_url = req.file ? `/uploads/${req.file.filename}` : null;
+    const photo_url = req.file ? `/api/uploads/${req.file.filename}` : null;
 
     // 1. Gemini를 통해 제목과 답변 동시 생성 요청
     const prompt = `당신은 에듀테크 학습 도우미입니다. 
@@ -633,7 +640,7 @@ app.post('/api/nodes/connect', async (req, res) => {
 app.post('/api/nodes', upload.single('photo'), async (req, res) => {
   try {
     let { chat_id, parent_id, reference_node_id, text_content, node_label, node_type, answer_text, model_id } = req.body;
-    const photo_url = req.file ? `/uploads/${req.file.filename}` : null;
+    const photo_url = req.file ? `/api/uploads/${req.file.filename}` : null;
 
     if (parent_id === "null" || parent_id === "" || parent_id === undefined) parent_id = null;
     if (reference_node_id === "null" || reference_node_id === "" || reference_node_id === undefined) reference_node_id = null;
@@ -787,7 +794,7 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
     const fullText = await aiService.generateResponse(finalModelId, {
       prompt,
       history,
-      imagePath: msg.photo_url ? path.join(__dirname, msg.photo_url) : null,
+      imagePath: msg.photo_url ? path.join(__dirname, 'uploads', path.basename(msg.photo_url)) : null,
       mimeType: "image/jpeg" // Assuming jpeg for stored photos
     });
 
