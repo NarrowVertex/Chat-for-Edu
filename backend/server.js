@@ -79,7 +79,7 @@ if (!fs.existsSync(uploadDir)) {
 // multer configuration
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, path.join(__dirname,'uploads/'));
+    cb(null, path.join(__dirname, 'uploads/'));
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
@@ -446,7 +446,7 @@ app.post('/api/chats', upload.single('photo'), async (req, res) => {
 
 위 질문에 대해 다음 두 가지를 생성해주세요:
 1. 질문의 핵심을 찌르는 10자 이내의 짧은 제목
-2. 학습 도우미로서 사용자가 이해하기 쉽도록 체계적으로 구조화된 상세한 심화 학습 내용 (수학 공식은 반드시 별도의 줄($$...$$)에 배치하여 독립된 칸처럼 보이게 하세요.)
+2. 학습 도우미로서 사용자가 이해하기 쉽도록 체계적으로 구조화된 상세한 심화 학습 내용 (각 핵심 내용이나 단계 사이에는 반드시 줄바꿈(엔터)을 2번 연속으로 사용하여 시각적으로 아주 명확히 구분되게 하세요. 절대로 '<두 줄 빈 줄>' 같은 글자를 직접 타이핑하지 마세요. 수학 공식은 반드시 별도의 줄($$...$$)에 배치하여 독립된 칸처럼 보이게 하세요.)
 
 응답 형식은 반드시 다음과 같이 작성하세요:
 [TITLE] 제목 내용
@@ -454,10 +454,9 @@ app.post('/api/chats', upload.single('photo'), async (req, res) => {
 
 [중요] 
 - '안녕하세요', '학습 도우미입니다'와 같은 인사말이나 자기소개는 절대 포함하지 마세요. 바로 본론(학습 내용)부터 답변하세요. 
-- 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 한글로 답변하세요.
-- **[줄바꿈 규칙 - 2단계로 엄격히 적용]**
-  - 1단계(절대 금지): 문장이 마침표로 끝나기 전에는 절대로 줄바꿈(엔터)을 하지 마세요. 문장이 아무리 길어도 마침표가 나올 때까지 한 줄로 이어 작성하세요.
-  - 2단계(문단 구분): 문장이 마침표로 완전히 끝난 후, 새로운 핵심 주제나 단계로 넘어갈 때는 반드시 빈 줄(엔터 2번)을 사용하여 시각적으로 명확히 구분하세요.`;
+- 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 
+- 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.
+- **[매우 중요] 절대로 한 문장 안(마침표가 찍히기 전)에서 임의로 줄바꿈(엔터)을 하지 마세요. 문장이 길어지더라도 줄을 끊지 말고 하나의 긴 줄로 이어서 작성하세요. 줄바꿈은 문단이 완전히 바뀌거나 다음 핵심 주제로 넘어갈 때만 사용하세요.**`;
 
     // 사용자 선호 모델 조회 (model_id가 없을 경우 대비)
     let finalModelId = model_id;
@@ -481,6 +480,9 @@ app.post('/api/chats', upload.single('photo'), async (req, res) => {
 
     if (titleMatch) aiTitle = titleMatch[1].split('\n')[0].trim();
     if (answerMatch) aiAnswer = answerMatch[1].trim();
+
+    // 단일 \n(문장 중간 줄바꿈)을 공백으로 치환. \n\n(문단 구분)은 유지.
+    aiAnswer = aiAnswer.replace(/([^\n])\n([^\n])/g, '$1 $2');
 
     // 2. 새 채팅 프로젝트 생성 (AI가 만든 제목 적용)
     const [chatResult] = await db.execute(
@@ -691,7 +693,7 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
 
 위 질문에 대해 다음 두 가지를 생성해주세요:
 1. 해당 단계의 학습 내용을 대표하는 10자 이내의 짧은 요약 제목
-2. 학습 도우미로서 사용자가 이해하기 쉽도록 체계적으로 구조화된 상세한 심화 학습 내용이나 해결책 (이전 대화(사용자의 질문과 AI의 답변)의 흐름과 맥락을 완벽하게 이해하고, 이어서 들어오는 질문에 대해 모순이 없도록 아주 자연스럽게 연결하여 답변하세요. 수학 공식은 반드시 별도의 줄($$...$$)에 배치하여 독립된 칸처럼 보이게 하세요.)
+2. 학습 도우미로서 사용자가 이해하기 쉽도록 체계적으로 구조화된 상세한 심화 학습 내용이나 해결책 (각 핵심 내용이나 단계 사이에는 반드시 줄바꿈(엔터)을 2번 연속으로 사용하여 시각적으로 아주 명확히 구분되게 하세요. 절대로 '<두 줄 빈 줄>' 같은 글자를 직접 타이핑하지 마세요. 이전 대화(사용자의 질문과 AI의 답변)의 흐름과 맥락을 완벽하게 이해하고, 이어서 들어오는 질문에 대해 모순이 없도록 아주 자연스럽게 연결하여 답변하세요. 수학 공식은 반드시 별도의 줄($$...$$)에 배치하여 독립된 칸처럼 보이게 하세요.)
 
 응답 형식은 반드시 다음과 같이 작성하세요:
 [TITLE] 제목 내용
@@ -699,10 +701,9 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
 
 [중요] 
 - '안녕하세요', '학습 도우미입니다'와 같은 인사말이나 자기소개는 절대 포함하지 마세요. 바로 본론(학습 내용)부터 답변하세요. 
-- 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 한글로 답변하세요.
-- **[줄바꿈 규칙 - 2단계로 엄격히 적용]**
-  - 1단계(절대 금지): 문장이 마침표로 끝나기 전에는 절대로 줄바꿈(엔터)을 하지 마세요. 문장이 아무리 길어도 마침표가 나올 때까지 한 줄로 이어 작성하세요.
-  - 2단계(문단 구분): 문장이 마침표로 완전히 끝난 후, 새로운 핵심 주제나 단계로 넘어갈 때는 반드시 빈 줄(엔터 2번)을 사용하여 시각적으로 명확히 구분하세요.`;
+- 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 
+- 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.
+- **[매우 중요] 절대로 한 문장 안(마침표가 찍히기 전)에서 임의로 줄바꿈(엔터)을 하지 마세요. 문장이 길어지더라도 줄을 끊지 말고 하나의 긴 줄로 이어서 작성하세요. 줄바꿈은 문단이 완전히 바뀌거나 다음 핵심 주제로 넘어갈 때만 사용하세요.**`;
 
       // 모델 결정
       let finalModelId = model_id;
@@ -730,6 +731,9 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
       if (answerMatch) aiAnswer = answerMatch[1].trim();
       else aiAnswer = fullText;
     }
+
+    // 단일 \n(문장 중간 줄바꿈)을 공백으로 치환. \n\n(문단 구분)은 유지.
+    aiAnswer = aiAnswer.replace(/([^\n])\n([^\n])/g, '$1 $2');
 
     const [result] = await db.execute(
       'INSERT INTO Messages (chat_id, parent_id, reference_node_id, sender, node_label, node_title, question_text, answer_text, photo_url, node_type, understanding_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -779,7 +783,7 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
 
 위 질문에 대해 다음 두 가지를 생성해주세요:
 1. 해당 단계의 학습 내용을 대표하는 10자 이내의 짧은 요약 제목
-2. 학습 도우미로서 사용자가 이해하기 쉽도록 체계적으로 구조화된 상세한 심화 학습 내용이나 해결책 (이전 대화(사용자의 질문과 AI의 답변)의 흐름과 맥락을 완벽하게 이해하고, 이어서 들어오는 질문에 대해 모순이 없도록 아주 자연스럽게 연결하여 답변하세요. 수학 공식은 반드시 별도의 줄($$...$$)에 배치하여 독립된 칸처럼 보이게 하세요.)
+2. 학습 도우미로서 사용자가 이해하기 쉽도록 체계적으로 구조화된 상세한 심화 학습 내용이나 해결책 (각 핵심 내용이나 단계 사이에는 반드시 줄바꿈(엔터)을 2번 연속으로 사용하여 시각적으로 아주 명확히 구분되게 하세요. 절대로 '<두 줄 빈 줄>' 같은 글자를 직접 타이핑하지 마세요. 이전 대화(사용자의 질문과 AI의 답변)의 흐름과 맥락을 완벽하게 이해하고, 이어서 들어오는 질문에 대해 모순이 없도록 아주 자연스럽게 연결하여 답변하세요. 수학 공식은 반드시 별도의 줄($$...$$)에 배치하여 독립된 칸처럼 보이게 하세요.)
 
 응답 형식은 반드시 다음과 같이 작성하세요:
 [TITLE] 제목 내용
@@ -787,10 +791,9 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
 
 [중요] 
 - '안녕하세요', '학습 도우미입니다'와 같은 인사말이나 자기소개는 절대 포함하지 마세요. 바로 본론(학습 내용)부터 답변하세요. 
-- 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 한글로 답변하세요.
-- **[줄바꿈 규칙 - 2단계로 엄격히 적용]**
-  - 1단계(절대 금지): 문장이 마침표로 끝나기 전에는 절대로 줄바꿈(엔터)을 하지 마세요. 문장이 아무리 길어도 마침표가 나올 때까지 한 줄로 이어 작성하세요.
-  - 2단계(문단 구분): 문장이 마침표로 완전히 끝난 후, 새로운 핵심 주제나 단계로 넘어갈 때는 반드시 빈 줄(엔터 2번)을 사용하여 시각적으로 명확히 구분하세요.`;
+- 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 
+- 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.
+- **[매우 중요] 절대로 한 문장 안(마침표가 찍히기 전)에서 임의로 줄바꿈(엔터)을 하지 마세요. 문장이 길어지더라도 줄을 끊지 말고 하나의 긴 줄로 이어서 작성하세요. 줄바꿈은 문단이 완전히 바뀌거나 다음 핵심 주제로 넘어갈 때만 사용하세요.**`;
 
     // 모델 결정
     let finalModelId = model_id;
@@ -821,6 +824,9 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
 
     if (titleMatch) aiTitle = titleMatch[1].split('\n')[0].trim();
     if (answerMatch) aiAnswer = answerMatch[1].trim();
+
+    // 단일 \n(문장 중간 줄바꿈)을 공백으로 치환. \n\n(문단 구분)은 유지.
+    aiAnswer = aiAnswer.replace(/([^\n])\n([^\n])/g, '$1 $2');
 
     // 3. 데이터베이스 업데이트 (Messages 테이블)
     await db.execute(
@@ -994,12 +1000,12 @@ ${contextText}
 
           let cleaned = fullText.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
           const jsonStartIndex = cleaned.indexOf('[');
-          
+
           if (jsonStartIndex !== -1) {
             let jsonString = cleaned.substring(jsonStartIndex);
             let quizData = [];
             let wasRepaired = false;
-            
+
             try {
               quizData = JSON.parse(jsonString);
             } catch (e) {
@@ -1051,12 +1057,12 @@ ${contextText}
         await db.execute(
           'INSERT INTO Questions (quiz_id, question_text, question_type, options, correct_answer, explanation, difficulty) VALUES (?, ?, ?, ?, ?, ?, ?)',
           [
-            quizId, 
-            q.question || null, 
-            q.type || null, 
-            q.options ? JSON.stringify(q.options) : null, 
-            q.answer || null, 
-            q.explanation || null, 
+            quizId,
+            q.question || null,
+            q.type || null,
+            q.options ? JSON.stringify(q.options) : null,
+            q.answer || null,
+            q.explanation || null,
             difficulty
           ]
         );
