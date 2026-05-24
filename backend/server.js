@@ -482,7 +482,7 @@ app.post('/api/chats', upload.single('photo'), async (req, res) => {
     if (answerMatch) aiAnswer = answerMatch[1].trim();
 
     // 단일 \n(문장 중간 줄바꿈)을 공백으로 치환. \n\n(문단 구분)은 유지.
-    aiAnswer = aiAnswer.replace(/([^\n])\n([^\n])/g, '$1 $2');
+    aiAnswer = aiAnswer.replace(/([^\n])\n(?=[^\n])/g, '$1 ');
 
     // 2. 새 채팅 프로젝트 생성 (AI가 만든 제목 적용)
     const [chatResult] = await db.execute(
@@ -733,7 +733,7 @@ app.post('/api/nodes', upload.single('photo'), async (req, res) => {
     }
 
     // 단일 \n(문장 중간 줄바꿈)을 공백으로 치환. \n\n(문단 구분)은 유지.
-    aiAnswer = aiAnswer.replace(/([^\n])\n([^\n])/g, '$1 $2');
+    aiAnswer = aiAnswer.replace(/([^\n])\n(?=[^\n])/g, '$1 ');
 
     const [result] = await db.execute(
       'INSERT INTO Messages (chat_id, parent_id, reference_node_id, sender, node_label, node_title, question_text, answer_text, photo_url, node_type, understanding_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -826,7 +826,7 @@ app.put('/api/messages/:id/regenerate', async (req, res) => {
     if (answerMatch) aiAnswer = answerMatch[1].trim();
 
     // 단일 \n(문장 중간 줄바꿈)을 공백으로 치환. \n\n(문단 구분)은 유지.
-    aiAnswer = aiAnswer.replace(/([^\n])\n([^\n])/g, '$1 $2');
+    aiAnswer = aiAnswer.replace(/([^\n])\n(?=[^\n])/g, '$1 ');
 
     // 3. 데이터베이스 업데이트 (Messages 테이블)
     await db.execute(
