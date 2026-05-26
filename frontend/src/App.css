@@ -3485,9 +3485,9 @@ body {
 
 .summary-paper-preview .summary-block {
   margin-bottom: 36px;
-  page-break-inside: avoid;
-  /* 페이지 잘림 방지 */
-  break-inside: avoid;
+  /* 블록 통째로 넘어가는 현상을 막기 위해 페이지 잘림 허용 */
+  page-break-inside: auto;
+  break-inside: auto;
 }
 
 .summary-paper-preview .summary-block.sub-block {
@@ -3505,6 +3505,9 @@ body {
   border-left: 4px solid #3b82f6;
   margin-bottom: 14px;
   line-height: 1.4;
+  /* 제목 직후에 페이지가 잘리는 것 방지 */
+  page-break-after: avoid;
+  break-after: avoid;
 }
 
 .summary-paper-preview .summary-image {
@@ -3673,10 +3676,10 @@ body {
     break-before: page;
   }
 
-  /* ⑪ 블록 중간 페이지 잘림 방지 */
+  /* ⑪ 블록 통째로 넘어가는 현상 방지 (자연스럽게 잘리도록 허용) */
   .summary-paper-preview .summary-block {
-    page-break-inside: avoid;
-    break-inside: avoid;
+    page-break-inside: auto;
+    break-inside: auto;
   }
 }
 
