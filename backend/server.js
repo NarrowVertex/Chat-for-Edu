@@ -853,6 +853,65 @@ app.delete('/api/chats/:chatId', async (req, res) => {
   }
 });
 
+// --- 평가(Promptfoo) 전용 API ---
+// DB 기록 없이 ChatForEdu 시스템 프롬프트를 적용한 순수 AI 응답만 반환
+app.post('/api/evaluate', async (req, res) => {
+  try {
+    const { question, model_id, history } = req.body;
+
+    if (!question || question.trim() === '') {
+      return res.status(400).json({ error: "질문(question)을 입력해주세요." });
+    }
+
+    const prompt = `당신은 에듀테크 학습 도우미입니다. 
+사용자의 질문: '${question}'
+
+위 질문에 대해 다음 두 가지를 생성해주세요:
+1. 질문의 핵심을 찌르는 10자 이내의 짧은 제목
+2. 학습 도우미로서 사용자가 이해하기 쉽도록 체계적으로 구조화된 상세한 심화 학습 내용 (각 핵심 내용이나 단계 사이에는 반드시 줄바꿈(엔터)을 2번 연속으로 사용하여 시각적으로 아주 명확히 구분되게 하세요. 절대로 '<두 줄 빈 줄>' 같은 글자를 직접 타이핑하지 마세요. 수학 공식은 반드시 별도의 줄($$...$$)에 배치하여 독립된 칸처럼 보이게 하세요.)
+
+응답 형식은 반드시 다음과 같이 작성하세요:
+[TITLE] 제목 내용
+[ANSWER] 답변 내용
+
+[중요] 
+- '안녕하세요', '학습 도우미입니다'와 같은 인사말이나 자기소개는 절대 포함하지 마세요. 바로 본론(학습 내용)부터 답변하세요. 
+- 답변 본문에는 절대 HTML 태그(<br>, <p>, <div>, <span> 등)를 사용하지 마세요. 
+- 줄바꿈은 마크다운 줄바꿈(빈 줄)만 사용하세요. 한글로 답변하세요.
+- **[매우 중요] 절대로 한 문장 안(마침표가 찍히기 전)에서 임의로 줄바꿈(엔터)을 하지 마세요. 문장이 길어지더라도 줄을 끊지 말고 하나의 긴 줄로 이어서 작성하세요. 줄바꿈은 문단이 완전히 바뀌거나 다음 핵심 주제로 넘어갈 때만 사용하세요.**`;
+
+    // 모델 결정: 요청에서 지정하거나, 기본 모델 사용
+    const finalModelId = model_id || availableModels[0]?.id;
+
+    const fullText = await aiService.generateResponse(finalModelId, {
+      prompt,
+      history: history || []
+    });
+
+    // [TITLE]과 [ANSWER] 파싱
+    let title = question.substring(0, 15);
+    let answer = fullText;
+
+    const titleMatch = fullText.match(/\[TITLE\]\s*(.*)/i);
+    const answerMatch = fullText.match(/\[ANSWER\]\s*([\s\S]*)/i);
+
+    if (titleMatch) title = titleMatch[1].split('\n')[0].trim();
+    if (answerMatch) answer = answerMatch[1].trim();
+
+    // 단일 \n(문장 중간 줄바꿈)을 공백으로 치환. \n\n(문단 구분)은 유지.
+    answer = answer.replace(/([^\n])\n(?=[^\n])/g, '$1 ');
+
+    res.json({ title, answer, raw: fullText, model: finalModelId });
+  } catch (error) {
+    console.error("Evaluate API Error:", error);
+    res.status(500).json({
+      error: error.status === 429
+        ? "AI 사용량 제한이 초과되었습니다. 잠시 후 다시 시도해 주세요."
+        : "평가용 응답 생성에 실패했습니다."
+    });
+  }
+});
+
 // --- 퀴즈 관련 API ---
 
 // --- 퀴즈 관련 API ---
